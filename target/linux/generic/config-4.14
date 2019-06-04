@@ -2145,7 +2145,7 @@ CONFIG_ISDN=y
 # CONFIG_IWL3945 is not set
 # CONFIG_IWLWIFI is not set
 # CONFIG_IXGB is not set
-# CONFIG_IXGBE is not set
+CONFIG_IXGBE=y
 # CONFIG_IXGBEVF is not set
 # CONFIG_JBD2_DEBUG is not set
 # CONFIG_JFFS2_CMODE_FAVOURLZO is not set
