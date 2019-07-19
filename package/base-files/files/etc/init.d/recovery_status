@@ -1,0 +1,10 @@
+#!/bin/sh /etc/rc.common
+
+START=00
+
+start() {
+	sys_partition="$(lsblk | grep "rom" | awk '{print $1}' | cut -d "-" -f2)"
+	
+	[ "$sys_partition" == "mmcblk0p6" ] && echo “do cloud_led”
+}
+

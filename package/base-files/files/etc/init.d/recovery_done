@@ -1,0 +1,23 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+
+start() {
+	sys_partition="$(lsblk | grep "rom" | awk '{print $1}' | cut -d "-" -f2)"
+
+	[ "$sys_partition" == "mmcblk0p6" ] && {
+		mount /dev/mmcblk0p3 /mnt
+		dd bs=4096 if=/dev/mmcblk0p5 of=/dev/mmcblk0p1
+		if [ -f "/mnt/openwrt-x86-64-rootfs-squashfs.img" ]; then
+			dd bs=4096 if=/mnt/openwrt-x86-64-rootfs-squashfs.img of=/dev/mmcblk0p2
+		else
+			dd bs=4096 if=/dev/mmcblk0p6 of=/dev/mmcblk0p2
+		fi
+		sleep 5
+		umount /mnt
+		logger "Successful recovery, ready to reboot the system!!!"
+		sleep 1
+		reboot
+	}
+}
+
