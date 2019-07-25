@@ -1,0 +1,5 @@
+config GPIO_DENVERTON
+        tristate "DENVERTON GPIO support"
+        depends on GENERIC_GPIO
+        help
+          Say yes here to support denverton  GPIO function
