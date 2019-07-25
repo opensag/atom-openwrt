@@ -1,0 +1,5 @@
+config GPIO_NCT5523D
+        tristate "NCT5523D GPIO support"
+        depends on GENERIC_GPIO
+        help
+          Say yes here to support GPIO functionality of NCT5523D super I/O chip
