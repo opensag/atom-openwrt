@@ -1,0 +1,5 @@
+config GPIO_CPLD
+        tristate "NEXSEC CPLD GPIO support"
+        depends on GENERIC_GPIO
+        help
+          Say yes here to support GPIO functionality of NEXSEC CPLD
