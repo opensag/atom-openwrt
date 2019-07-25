@@ -1,0 +1,5 @@
+config DTA116X_DEVICES
+        tristate "NEXSEC dta116x devices driver support"
+        depends on GENERIC_GPIO
+        help
+          Say yes here to support NEXSEC dta116x devices driver
