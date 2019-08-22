@@ -21,8 +21,7 @@ define Package/quectel-CM
   TITLE:=Quectel LTE module dial tool
   DEPENDS:=+libc \
   		   +kmod-usb-net +kmod-usb-net-cdc-ether \
-  		   +kmod-usb-serial +kmod-usb-serial-option +kmod-usb-serial-wwan \
-  		   +kmod-ppp +kmod-ppp-synctty
+  		   +kmod-usb-serial +kmod-usb-serial-option +kmod-usb-serial-wwan
 endef
 
 define Build/Prepare
