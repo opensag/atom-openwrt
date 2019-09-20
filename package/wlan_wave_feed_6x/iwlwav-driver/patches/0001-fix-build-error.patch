@@ -1,0 +1,57 @@
+From a04cd0dd912feb09583319aa18249c082c1519d1 Mon Sep 17 00:00:00 2001
+From: jialelux <jialex.lu@intel.com>
+Date: Wed, 21 Aug 2019 02:15:52 +0800
+Subject: [PATCH 1/7] fix build error
+
+---
+ drivers/net/wireless/intel/iwlwav/wireless/driver/cfg80211.c   | 2 +-
+ drivers/net/wireless/intel/iwlwav/wireless/driver/mac80211.c   | 2 +-
+ drivers/net/wireless/intel/iwlwav/wireless/driver/wave_radio.c | 2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/cfg80211.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/cfg80211.c
+index b93566a..011a8ce 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/cfg80211.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/cfg80211.c
+@@ -10,9 +10,9 @@
+ #include "mtlkinc.h"
+ #include <net/iw_handler.h>
+ #include <net/cfg80211.h>
+-#ifndef CPTCFG_IWLWAV_X86_HOST_PC
+ #include <../net/wireless/core.h>
+ #include <../net/wireless/nl80211.h>
++#ifndef CPTCFG_IWLWAV_X86_HOST_PC
+ #include <../net/wireless/reg.h>
+ #endif
+ 
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/mac80211.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/mac80211.c
+index 13b4723..6ec8afd 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/mac80211.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/mac80211.c
+@@ -11,8 +11,8 @@
+ #include <net/iw_handler.h>
+ #include <net/cfg80211.h>
+ #include <net/mac80211.h>
+-#ifndef CPTCFG_IWLWAV_X86_HOST_PC
+ #include <../net/wireless/core.h>
++#ifndef CPTCFG_IWLWAV_X86_HOST_PC
+ #endif
+ #include <linux/netdevice.h>
+ 
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/wave_radio.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/wave_radio.c
+index 9e69305..e6ae47c 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/wave_radio.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/wave_radio.c
+@@ -19,8 +19,8 @@
+ 
+ #include "mtlkinc.h"
+ #include <net/cfg80211.h>
+-#ifndef CPTCFG_IWLWAV_X86_HOST_PC
+ #include <../net/wireless/core.h>
++#ifndef CPTCFG_IWLWAV_X86_HOST_PC
+ #include <../net/wireless/nl80211.h>
+ #endif
+ 
+-- 
+1.9.1
+

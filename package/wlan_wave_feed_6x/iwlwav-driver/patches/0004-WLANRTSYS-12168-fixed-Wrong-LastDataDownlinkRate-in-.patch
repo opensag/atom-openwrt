@@ -1,0 +1,105 @@
+From 97194208a09fa76de72156f3dd4348d1ba365098 Mon Sep 17 00:00:00 2001
+From: timonins <sergejs.timonins@intel.com>
+Date: Thu, 13 Jun 2019 08:47:19 +0200
+Subject: [PATCH 4/7] WLANRTSYS-12168 fixed: Wrong LastDataDownlinkRate in
+ STA_MEASUREMENTS
+
+- Changed: TX Rate statictic data parcing
+- Tested: using getter commands for TX data rate statistic with and w/o data traffic - hostapd_cli sta_measurements and dwpal_cli PeerRatesInfo
+- Sync Required: No
+---
+ .../wireless/intel/iwlwav/wireless/driver/hw_mmb.c | 55 ++++++++++++++++------
+ .../wireless/intel/iwlwav/wireless/driver/stadb.c  |  4 ++
+ 2 files changed, 45 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c
+index 169cbaa..e31c8e3 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c
+@@ -6282,26 +6282,53 @@ _mtlk_hw_mhi_sta_fill_tx_rate_statistic (mtlk_hw_t *hw, mtlk_mhi_stats_sta_tx_ra
+ }
+ #else /* MTLK_LEGACY_STATISTICS */
+ 
++static __INLINE void
++__wave_hw_mhi_sta_fill_tx_rate_statistic_wave600 (mtlk_mhi_stats_sta_tx_rate_t *dst_stats, StatisticsDb_t_wave600 *src_stats, uint32 sid)
++{
++    uint8 cbw = src_stats->linkAdaptationStats.dataBwLimit[sid];
++
++    dst_stats->dataBwLimit = cbw;
++    dst_stats->DataPhyMode = src_stats->linkAdaptationStats.DataPhyMode[sid][cbw];
++    dst_stats->scpData = src_stats->linkAdaptationStats.scpData[sid][cbw];
++    dst_stats->mcsData = src_stats->linkAdaptationStats.mcsData[sid][cbw];
++    dst_stats->nssData = src_stats->linkAdaptationStats.nssData[sid][cbw];
++    dst_stats->bfModeData = src_stats->linkAdaptationStats.bfModeData[sid];
++    dst_stats->stbcModeData = src_stats->linkAdaptationStats.stbcModeData[sid];
++    dst_stats->powerData = src_stats->linkAdaptationStats.powerData[sid][cbw];
++    dst_stats->powerManagement = src_stats->linkAdaptationStats.powerManagement[sid][cbw];
++    dst_stats->ManagementPhyMode = src_stats->linkAdaptationStats.ManagementPhyMode[sid][cbw];
++}
++
++static __INLINE void
++__wave_hw_mhi_sta_fill_tx_rate_statistic_wave600b (mtlk_mhi_stats_sta_tx_rate_t *dst_stats, StatisticsDb_t_wave600b *src_stats, uint32 sid)
++{
++    uint8 cbw = src_stats->linkAdaptationStats.dataBwLimit[sid];
++
++    dst_stats->dataBwLimit = cbw;
++    dst_stats->DataPhyMode = src_stats->linkAdaptationStats.DataPhyMode[sid][cbw];
++    dst_stats->scpData = src_stats->linkAdaptationStats.scpData[sid][cbw];
++    dst_stats->mcsData = src_stats->linkAdaptationStats.mcsData[sid][cbw];
++    dst_stats->nssData = src_stats->linkAdaptationStats.nssData[sid][cbw];
++    dst_stats->bfModeData = src_stats->linkAdaptationStats.bfModeData[sid];
++    dst_stats->stbcModeData = src_stats->linkAdaptationStats.stbcModeData[sid];
++    dst_stats->powerData = src_stats->linkAdaptationStats.powerData[sid][cbw];
++    dst_stats->powerManagement = src_stats->linkAdaptationStats.powerManagement[sid][cbw];
++    dst_stats->ManagementPhyMode = src_stats->linkAdaptationStats.ManagementPhyMode[sid][cbw];
++}
++
+ static void
+ _mtlk_hw_mhi_sta_fill_tx_rate_statistic (mtlk_hw_t *hw, mtlk_mhi_stats_sta_tx_rate_t *tx_stats, uint32 sta_sid)
+ {
+     hw_statistics_t    *hw_stats = &hw->hw_stats;
+-    uint8               cbw = 0;
+-    int                 chip_id = __hw_mmb_get_chip_id(hw);
++    uint16              chip_id = __hw_mmb_get_chip_id(hw);
+ 
+     mtlk_osal_lock_acquire(&hw_stats->lock);
+-    tx_stats->dataBwLimit = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.dataBwLimit[sta_sid], chip_id));
+-
+-    cbw = tx_stats->dataBwLimit;
+-    tx_stats->DataPhyMode = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.DataPhyMode[sta_sid][cbw], chip_id));
+-    tx_stats->scpData = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.scpData[sta_sid][cbw], chip_id));
+-    tx_stats->mcsData = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.mcsData[sta_sid][cbw], chip_id));
+-    tx_stats->nssData = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.nssData[sta_sid][cbw], chip_id));
+-    tx_stats->bfModeData = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.bfModeData[sta_sid], chip_id));
+-    tx_stats->stbcModeData = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.stbcModeData[sta_sid], chip_id));
+-    tx_stats->powerData = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.powerData[sta_sid][cbw], chip_id));
+-    tx_stats->powerManagement = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.powerManagement[sta_sid][cbw], chip_id));
+-    tx_stats->ManagementPhyMode = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.ManagementPhyMode[sta_sid][cbw], chip_id));
++
++    if (_chipid_is_gen6_a0(chip_id))
++        __wave_hw_mhi_sta_fill_tx_rate_statistic_wave600(tx_stats, (StatisticsDb_t_wave600 *)hw_stats->stats_copy, sta_sid);
++    else if (_chipid_is_gen6_b0(chip_id))
++        __wave_hw_mhi_sta_fill_tx_rate_statistic_wave600b(tx_stats, (StatisticsDb_t_wave600b *)hw_stats->stats_copy, sta_sid);
++
+     mtlk_osal_lock_release(&hw_stats->lock);
+ }
+ #endif /* MTLK_LEGACY_STATISTICS */
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/stadb.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/stadb.c
+index 48b9402..b8ba8c2 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/stadb.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/stadb.c
+@@ -1603,7 +1603,11 @@ mtlk_stadb_get_stat(sta_db *stadb, hst_db *hstdb, mtlk_clpb_t *clpb, uint8 group
+         stadb_stat.u.general_stat.tx_rate = _mtlk_sta_get_tx_data_rate(sta);
+         stadb_stat.u.general_stat.is_sta_auth = _mtlk_sta_get_is_sta_auth(sta);
+         stadb_stat.u.general_stat.is_four_addr = mtlk_sta_is_4addr(sta);
++#ifdef MTLK_LEGACY_STATISTICS
+         stadb_stat.u.general_stat.nss = _mtlk_sta_get_nss(sta);
++#else
++        stadb_stat.u.general_stat.nss = mtlk_bitrate_info_get_nss(sta->info.stats.tx_data_rate_params);
++#endif
+ 
+         mtlk_sta_get_peer_stats(sta, &stadb_stat.u.general_stat.peer_stats);
+ 
+-- 
+1.9.1
+

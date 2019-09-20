@@ -73,6 +73,7 @@ define Package/uci/install
 	$(INSTALL_DIR) $(1)/sbin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/uci $(1)/sbin/
 	$(CP) ./files/* $(1)/
+	$(RM) $(1)/lib/config/uci.sh
 endef
 
 define Build/InstallDev

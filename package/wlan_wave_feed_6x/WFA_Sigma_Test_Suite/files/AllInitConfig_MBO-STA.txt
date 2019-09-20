@@ -1,0 +1,200 @@
+#$! File Name: AllInitCommands_MBO.txt
+#
+# Copyright (c) 2017 Wi-Fi Alliance
+# 
+# 
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES 
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF 
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY 
+# SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER 
+# RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+# NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE
+# USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+#
+#   Description  : This file hold all CAPI commands used for common pre-process
+#                  in test cases. It is part of pre-process to configure system 
+#                  environment, but related to CAPI commands send to device, not 
+#                  parameters set up.
+#   Note         : It is collected from Get-Version-Info and NAN-testbed-reset.txt,  
+#                  to make sure AllInitConfig_11n only focus on parameters initialization. 
+#                  
+#   Program      : MBO
+#   Version      : 0.0.1 
+#   Release date : Dec. 7, 2016
+#  
+############################################################################ZZZ
+
+
+### ===============  General set up ===========================================
+define!$WTS_ControlAgent_Support!1!
+
+
+## Used For 4.2.3 / 5.2.3
+# AP1 with ability to support multiple BSSIDs/Concurrency / 0 - use ap1,ap2,ap3 1 - use ap1 with 3 different BSSIDs
+define!$AP1_support_multi_BSSIDs!1!
+
+# AP2 with ability to support multiple BSSIDs/Concurrency / 0 - use ap1,ap2,ap3 1 - use ap1 with 3 different BSSIDs
+define!$AP2_support_multi_BSSIDs!1!
+
+
+### ===============   DUT info  ===============================================
+# DUT Control Agent
+wfa_control_agent_dut!ipaddr=192.168.1.2,port=9000!
+
+define!$DUT_wireless_ip!192.168.1.138!
+
+# Name of the APUT or STAUT
+define!$DUT_Name!INTEL!
+
+
+
+#if!$WTS_ControlAgent_Support!=!1!
+### ==========If DUT does not support Wi-Fi Test Suite, =======================
+# Please update the values for all the below fields.
+# N/A
+
+
+### ================  Testbed STA info  =======================================
+
+# STA1 connection info
+sta1mbo_sta_wireless_ip!192.168.1.138!
+wfa_control_agent_sta1mbo_sta!ipaddr=192.168.1.2,port=9000!
+
+#wfa_control_agent_sta1mbo_sta!ipaddr=192.168.1.2,port=9000!
+
+#wfa_control_agent_sta2mbo_sta!ipaddr=192.168.10.40,port=9000!
+
+#wfa_control_agent_sta3mbo_sta!ipaddr=192.168.10.50,port=9000!
+
+#wfa_control_agent_sta4mbo_sta!ipaddr=192.168.10.60,port=9000!
+
+
+### ================  Testbed AP info  =======================================
+#info!Connecting to AP Configuration Agent!
+# Control IP Address for Testbed AP config server
+#TestbedAPConfigServer!ipaddr=127.0.0.1,port=7000!
+
+#AP1
+wfa_control_agent_ap1mbo_ap!ipaddr=192.168.1.1,port=9000!
+define!$ap1mbo_ap_wireless_ip!192.168.1.1!
+
+#AP2
+wfa_control_agent_ap2mbo_ap!ipaddr=192.168.1.3,port=9000!
+
+#AP3
+wfa_control_agent_ap3mbo_ap!ipaddr=192.168.1.4,port=9000!
+
+#AP4
+##wfa_control_agent_ap4mbo_ap!ipaddr=192.168.10.61,port=9000!
+
+#AP5
+#wfa_control_agent_ap5mbo_ap!ipaddr=192.168.10.71,port=9000!
+
+#AP6
+#wfa_control_agent_ap6mbo_ap!ipaddr=192.168.10.81,port=9000!
+
+### =============== SNIFFER ===================================================
+# comment out IP address below to skip sniffer checks
+wfa_sniffer!ipaddr=192.168.1.10,port=9999!
+
+#For ASUS sniffer control, this must be set with port 9905, and set wfa_sniffer agent port 9999
+wfa_control_agent_capture_sta!ipaddr=192.168.1.10,port=9905!
+
+
+# Set sniffer enable to 0 to skip start and stop sniffer commands
+sniffer_enable!1!
+
+
+### =============== PC Endpoint (WFA Traffic generator console) ===================================================
+
+# Control IP Address for Console
+#wfa_console_ctrl!ipaddr=192.168.250.50,port=9003!
+
+# Traffic generator IP Address for Console
+#wfa_console_tg!192.165.180.50!
+
+###############################################################################
+### Static setting, no change in general
+
+# Loading Display Names, do not change them.
+wfa_test_commands_init!DisplayNames.txt!
+
+
+define!$Broadcast_MACAddress!FF:FF:FF:FF:FF:FF!
+
+define!$netmask!255.255.0.0!
+
+
+
+
+#PASSPHRASE(PSK)
+define!$PASSPHRASE!MBORocks!
+
+#Do not change
+define!$Security!personal!
+define!$decryptRet!PASS!
+###############################################################################
+
+#to enable Sniffer log uploading to UCC
+#before enable this, make sure tftp is running on both UCC and Sniffer
+define!$Sniffer_Upload!1!
+
+
+####################### Testbed Qualification mode #######################
+define!$TestQualMode!1!
+
+### =============== RADIUS Server information  ================================
+# HOSTAPD
+HostAPDIPAddress!192.165.100.35!
+HostAPDPort!1812!
+HostAPDSharedSecret!1234567890123456789012345678901234567890123456789012345678901234!
+
+# Microsoft
+#MicrosoftIPAddress!192.165.100.35!
+#MicrosoftPort!1812!
+#MicrosoftSharedSecret!1234567890123456789012345678901234567890123456789012345678901234!
+
+# Radiator
+#RadiatorIPAddress!192.165.100.18!
+#RadiatorPort!1812!
+#RadiatorSharedSecret!1234567890123456789012345678901234567890123456789012345678901234!
+
+# EAP-Credentials setting
+
+#NOTE - This file contains the default crendentials for Wi-Fi Certification testing
+#       If you use different certificate or credentials, modify the below parameters accordingly
+#       This is only needed for Enterprise test cases 4.2.6E / 5.2.6E
+
+# EAP-TLS 
+define!$trustedRootCACertName!cas.pem!
+define!$clientCertificateName!wifiuser.pem!
+
+# EAP-TTLS 
+define!$TTLSUserName!wifi-user!
+define!$TTLSPassword!test%11!
+
+# EAP-PEAP0 / PEAP1 
+define!$PUserName!wifi-user!
+define!$PPassword!test%11!
+
+# EAP-SIM 
+define!$SIMUserName!1232010000000000!
+define!$SIMPassword!90dca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581:000000000123!
+
+# EAP-AKA 
+define!$AKAUserName!0232010000000000!
+define!$AKAPassword!90dca4eda45b53cf0f12d7c9c3bc6a89:cb9cccc4b9258e6dca4760379fb82581:000000000123!
+
+# EAP-FAST 
+define!$FASTUserName!wifi-user!
+define!$FASTPassword!test%11!
+
+# HOSTAPD - 
+define!$RADIUSCTRLIPAddress!$RADIUSIPAddress!
+define!$serloginusr!wifiuser!
+define!$serloginpwd!asdlinux!
+define!$transMethod!scp!
+define!$MSKPATH!/tmp/msk.dump!
+define!$mskfile!msk.dump!
+define!$destPath!/WTSSniffer!

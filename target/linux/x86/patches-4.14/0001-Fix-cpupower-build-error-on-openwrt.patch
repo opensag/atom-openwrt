@@ -1,0 +1,37 @@
+From 4677beea65d1b47ea16d80df563a9b0999913372 Mon Sep 17 00:00:00 2001
+From: Huajun Li <huajun.li@intel.com>
+Date: Thu, 1 Aug 2019 16:45:16 +0800
+Subject: [PATCH 1/1] Fix cpupower build error on openwrt
+
+---
+ tools/power/cpupower/Makefile | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/tools/power/cpupower/Makefile b/tools/power/cpupower/Makefile
+index d6e1c02..6f69bf9 100644
+--- a/tools/power/cpupower/Makefile
++++ b/tools/power/cpupower/Makefile
+@@ -34,7 +34,7 @@ endif
+ 
+ # Set the following to `true' to make a unstripped, unoptimized
+ # binary. Leave this set to `false' for production use.
+-DEBUG ?=	true
++DEBUG ?=	false
+ 
+ # make the build silent. Set this to something else to make it noisy again.
+ V ?=		false
+@@ -218,9 +218,9 @@ $(OUTPUT)%.o: %.c
+ $(OUTPUT)cpupower: $(UTIL_OBJS) $(OUTPUT)libcpupower.so.$(LIB_MAJ)
+ 	$(ECHO) "  CC      " $@
+ ifeq ($(strip $(STATIC)),true)
+-	$(QUIET) $(CC) $(CFLAGS) $(LDFLAGS) $(UTIL_OBJS) -lrt -lpci -L$(OUTPUT) -o $@
++	$(QUIET) $(CC) $(CFLAGS) $(LDFLAGS) $(UTIL_OBJS) -lz -lrt -lpci -L$(OUTPUT) -o $@
+ else
+-	$(QUIET) $(CC) $(CFLAGS) $(LDFLAGS) $(UTIL_OBJS) -lcpupower -lrt -lpci -L$(OUTPUT) -o $@
++	$(QUIET) $(CC) $(CFLAGS) $(LDFLAGS) $(UTIL_OBJS) -lz -lcpupower -lrt -lpci -L$(OUTPUT) -o $@
+ endif
+ 	$(QUIET) $(STRIPCMD) $@
+ 
+-- 
+2.7.4
+

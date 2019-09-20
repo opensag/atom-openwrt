@@ -38,6 +38,8 @@ define Package/netifd/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/netifd $(1)/sbin/
 	$(CP) ./files/* $(1)/
 	$(CP) $(PKG_BUILD_DIR)/scripts/* $(1)/lib/netifd/
+	$(RM) $(1)/lib/netifd/utils.sh
+	$(RM) $(1)/lib/netifd/netifd-wireless.sh
 endef
 
 $(eval $(call BuildPackage,netifd))

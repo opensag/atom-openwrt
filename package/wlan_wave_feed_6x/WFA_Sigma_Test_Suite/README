@@ -1,0 +1,45 @@
+################# README ###############
+################ Instructions for MBO sigma agent #################
+
+1. Run time operations
+
+1.1 Run-time update of sigma agent:
+	To update the sigma agent during run-time use script sigma-update.sh.
+	This will download new sigma agent sigma-ap.sh to /usr/lib, copy it to /tmp and restart the netcat to listen on port 9000 for commands directed to sigma-agent
+	Usage:
+	##killall sh
+	/opt/lantiq/wave/scripts/sigma-update.sh <tftpServerIp>
+	
+	## OLD Important note: Do not forget the first step "killall sh", otherwise you will run into endless loop of re-starting sigma agent (still can escape by running killall sh)
+	New note: sigma-start.sh cleans up existing executions of the sigma scripts, so killall is not necessary any more (unless some fatal condition occurs)
+
+1.2 Run-time update of FAPI libraries and fapi_wlan_beerock_cli	
+	This will update libraries libfapiwlancommon.so, fapi_wlan_beerock_cli and libfapiwave.so to the board.
+	Usage:
+	/opt/lantiq/wave/scripts/fapibeerock-update.sh <tftpServerIp>
+	reboot
+
+1.3 Start-up sigma agent after reboot
+	This will start the sigma agent after a reboot of the DUT.
+	Usage:
+	/opt/lantiq/wave/scripts/sigma-start.sh
+
+2. Steps to be done after flashing new image
+
+	1. Download update scripts to /opt/lantiq/wave/scripts folder
+		cd /opt/lantiq/wave/scripts/
+		tftp -gr sigma-update.sh <serverIP>
+		tftp -gr sigma-start.sh <serverIP>
+		tftp -gr fapibeerock-update.sh <serverIP>
+		chmod +x sigma-update.sh sigma-start.sh fapibeerock-update.sh
+	2. Download and start the sigma agent
+		/opt/lantiq/wave/scripts/sigma-update.sh <tftpServerIp>
+
+List of files required in the tftp directory:
+•	fapibeerock-update.sh
+•	sigma-update.sh
+•	sigma-start.sh
+•	sigma-ap.sh
+•	libfapiwlancommon.so
+•	libfapiwave.so
+•	fapi_wlan_beerock_cli

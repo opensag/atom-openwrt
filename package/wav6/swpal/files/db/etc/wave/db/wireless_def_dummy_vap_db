@@ -1,0 +1,4 @@
+		option network 'lan'
+		option mode 'ap'
+		option hidden '1'
+		option ssid 'dummy_ssid'

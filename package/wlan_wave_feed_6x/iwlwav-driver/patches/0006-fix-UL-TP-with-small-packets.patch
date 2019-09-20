@@ -1,0 +1,241 @@
+From 7054192c64a538d038579588bd03f767cdd2ee34 Mon Sep 17 00:00:00 2001
+From: Huajun Li <huajun.li@intel.com>
+Date: Mon, 5 Aug 2019 11:28:31 +0800
+Subject: [PATCH 6/7] fix UL TP with small packets
+
+   increase RD
+   define SWPATH_RX_RING_SIZE 10240
+   interrupt update
+---
+ .../wireless/intel/iwlwav/wireless/driver/core.c   |  3 ++
+ .../wireless/intel/iwlwav/wireless/driver/core.h   |  3 ++
+ .../wireless/intel/iwlwav/wireless/driver/hw_hal.h |  3 ++
+ .../wireless/intel/iwlwav/wireless/driver/hw_mmb.c | 52 ++++++++++++++++++++--
+ .../intel/iwlwav/wireless/driver/mtlk_df_user.c    |  5 ++-
+ .../iwlwav/wireless/shared_mbss_mac/mhi_umi.h      |  1 +
+ .../intel/iwlwav/wireless/shared_mbss_mac/shram.h  |  1 +
+ 7 files changed, 63 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c
+index dea5716..6dcc414 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c
+@@ -13807,6 +13807,9 @@ _mtlk_core_get_status (mtlk_handle_t hcore, const void* data, uint32 data_size)
+   (void)mtlk_hw_get_prop(hw_api, MTLK_HW_BSS_MGMT_FREE_RES_MSGS, &general_stats->bss_mgmt_bds_free_num_res, sizeof(general_stats->bss_mgmt_bds_free_num_res));
+   (void)mtlk_hw_get_prop(hw_api, MTLK_HW_BSS_MGMT_MSGS_RES_USED_PEAK, &general_stats->bss_mgmt_bds_usage_peak_res, sizeof(general_stats->bss_mgmt_bds_usage_peak_res));
+ 
++  (void)mtlk_hw_get_prop(hw_api, MTLK_HW_RX_HDS_CUR_MSGS, &general_stats->rx_hds_cur, sizeof(general_stats->rx_hds_cur));
++  (void)mtlk_hw_get_prop(hw_api, MTLK_HW_RX_HDS_LAST_READ_MSGS, &general_stats->rx_hds_last_read, sizeof(general_stats->rx_hds_last_read));
++  (void)mtlk_hw_get_prop(hw_api, MTLK_HW_RX_HDS_LAST_PROCESSED_MSGS, &general_stats->rx_hds_last_processed, sizeof(general_stats->rx_hds_last_processed));
+   (void)mtlk_hw_get_prop(hw_api, MTLK_HW_FREE_TX_MSGS, &general_stats->tx_msdus_free, sizeof(general_stats->tx_msdus_free));
+   (void)mtlk_hw_get_prop(hw_api, MTLK_HW_TX_MSGS_USED_PEAK, &general_stats->tx_msdus_usage_peak, sizeof(general_stats->tx_msdus_usage_peak));
+   (void)mtlk_hw_get_prop(hw_api, MTLK_HW_BIST, &general_stats->bist_check_passed, sizeof(general_stats->bist_check_passed));
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/core.h b/drivers/net/wireless/intel/iwlwav/wireless/driver/core.h
+index 94f11bd..85dea7d 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/core.h
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/core.h
+@@ -363,6 +363,9 @@ struct priv_stats {
+ typedef struct _mtlk_core_general_stats_t {
+   struct priv_stats   core_priv_stats;
+   mtlk_mhi_stats_vap_t  mhi_vap_stat;
++  uint32  rx_hds_cur;
++  uint32  rx_hds_last_read;
++  uint32  rx_hds_last_processed;
+   uint32  tx_msdus_free;
+   uint32  tx_msdus_usage_peak;
+   uint32  bist_check_passed;
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_hal.h b/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_hal.h
+index 4f4f5fc..620a248 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_hal.h
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_hal.h
+@@ -34,6 +34,9 @@ typedef struct _mtlk_persistent_device_data_t mtlk_persistent_device_data_t;
+ typedef enum _mtlk_hw_prop_e
+ {/* prop_id */
+   MTLK_HW_PROP_STATE,             /* buffer: GET: mtlk_hw_state_e*,              SET - mtlk_hw_state_e*                              */
++  MTLK_HW_RX_HDS_CUR_MSGS,        /* buffer: GET: uint32*,                       SET - not supported                                 */
++  MTLK_HW_RX_HDS_LAST_READ_MSGS,  /* buffer: GET: uint32*,                       SET - not supported                                 */
++  MTLK_HW_RX_HDS_LAST_PROCESSED_MSGS, /* buffer: GET: uint32*,                       SET - not supported                                 */
+   MTLK_HW_FREE_TX_MSGS,           /* buffer: GET: uint32*,                       SET - not supported                                 */
+   MTLK_HW_TX_MSGS_USED_PEAK,      /* buffer: GET: uint32*,                       SET - not supported                                 */
+   MTLK_HW_PROGMODEL,              /* buffer: GET: mtlk_core_firmware_file_t*,    SET - const mtlk_core_firmware_file_t*              */
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c
+index 1469f10..4b66705 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c
+@@ -938,6 +938,7 @@ typedef union {
+     uint32 band_cfg;
+     uint32 dual_pcie_cfg;
+     uint32 platform_type;
++    uint32 dcdp_path_available;
+   } card_cfg;
+ } fw_chi_card_cfg_t;
+ 
+@@ -993,6 +994,8 @@ struct _mtlk_hw_t
+   mtlk_hw_ind_req_bd_t   bds;     /* IND/REQ BD */
+ 
+   struct mtlk_tx         tx;      /* DAT TX-related variables */
++  uint32                 rx_hds_last_read;  /* Num of RX HD descriptors last time read */
++  uint32                 rx_hds_last_processed;  /* Num of RX HD descriptors last time processed*/
+ #ifdef MTLK_DEBUG
+   mtlk_dbg_hres_ts_t     tx_interrupt_time;
+ #endif
+@@ -2907,12 +2910,13 @@ _mtlk_mmb_data_rx_process (mtlk_irq_handler_data *ihd)
+ #endif
+ 
+   hds_to_process = mtlk_ccr_ring_get_hds_to_process(hw->ccr, &hw->rx.ring.regs);
++  hw->rx_hds_last_read = hds_to_process;
+   MTLK_TRACER_ADD_ENTRY(hw, MTLK_TR_DATA_RX_START, hds_to_process);
+   if (__UNLIKELY(hds_to_process == 0)) {
+     MTLK_TRACER_ADD_ENTRY(hw, MTLK_TR_DATA_RX_END, 0);
+     return;
+   }
+-
++  hw->rx_hds_last_processed = hds_to_process;
+   if (hds_to_process > hw->data_rx_lim) {
+     hds_to_process = hw->data_rx_lim;
+   }
+@@ -2931,6 +2935,7 @@ _mtlk_mmb_data_rx_process (mtlk_irq_handler_data *ihd)
+       _mtlk_mmb_put_hd_to_ring(hw, hw->rx.ring.base_addr + hw->rx.ring.read_ptr, &hw->rx.ring);
+     }
+     INC_WRAP_IDX(hw->rx.ring.read_ptr, hw->rx.ring.size);
++    mtlk_ccr_ring_clear_interrupt(hw->ccr, &hw->rx.ring.regs, 1);
+     CPU_STAT_END_TRACK(CPU_STAT_ID_RX_DAT);
+     CPU_STAT_END_TRACK(CPU_STAT_ID_RX_HW);
+   }
+@@ -2949,7 +2954,7 @@ _mtlk_mmb_data_rx_process (mtlk_irq_handler_data *ihd)
+   }
+ #endif
+ 
+-  mtlk_ccr_ring_clear_interrupt(hw->ccr, &hw->rx.ring.regs, hds_to_process);
++/*  mtlk_ccr_ring_clear_interrupt(hw->ccr, &hw->rx.ring.regs, hds_to_process); */
+   MTLK_TRACER_ADD_ENTRY(hw, MTLK_TR_DATA_RX_END, hds_to_process);
+   MTLK_TRACER_ADD_ENTRY(hw, MTLK_TR_DATA_RX_REM, mtlk_ccr_ring_get_hds_to_process(hw->ccr, &hw->rx.ring.regs));
+ 
+@@ -3042,7 +3047,6 @@ bss_rx_process (mtlk_irq_handler_data *ihd)
+       MTLK_TRACER_ADD_ENTRY(hw, MTLK_TR_BSS_RX_END, 0);
+       return;
+     }
+-
+     if (hds_to_process > hw->bss_rx_lim) {
+       hds_to_process = hw->bss_rx_lim;
+     }
+@@ -4890,7 +4894,7 @@ _mtlk_get_rx_ring_size(mtlk_hw_t *hw)
+     MTLK_ASSERT(hw->ccr);
+     CARD_SELECTOR_START(hw->ccr->hw_type) /* initialize ring_size */
+       IF_CARD_PCIEG5 (ring_size = GEN5_RX_RING_SIZE);
+-      IF_CARD_PCIEG6 (ring_size = GEN5_RX_RING_SIZE);
++      IF_CARD_PCIEG6 (hw->dcdp_path_is_available ? (ring_size = GEN5_RX_RING_SIZE) : (ring_size = SWPATH_RX_RING_SIZE));
+     CARD_SELECTOR_END(); /* other types should not get here */
+ 
+     /* possibly this can be removed later after testing, currently not supported */
+@@ -8026,6 +8030,19 @@ static void _wave_hw_dual_pci_mode_set(mtlk_hw_t *hw, BOOL is_dual_pci)
+   }
+ }
+ 
++/* set fast path enabled or sw path enabled */
++static void _wave_hw_fast_path_set(mtlk_hw_t *hw, BOOL dcdp_path_is_available)
++{
++  if (dcdp_path_is_available) {
++    ILOG0_V("fast path enabled");
++    hw->fw_card_cfg.card_cfg.dcdp_path_available = FASTPATH_ENABLED;
++  }
++  else {
++    ILOG0_V("sw path enabled");
++    hw->fw_card_cfg.card_cfg.dcdp_path_available = FASTPATH_DISABLED;
++  }
++}
++
+ static void
+ _wave_hw_cfg_platform_type_set (mtlk_hw_t *hw)
+ {
+@@ -8085,6 +8102,9 @@ mtlk_hw_mmb_init_card(mtlk_hw_t *hw, mtlk_ccr_t *ccr, unsigned char *mmb_pas, un
+   /* init dual pci flag*/
+   _wave_hw_dual_pci_mode_set(hw, is_dual_pci);
+ 
++  /* init SW path enabled flag*/
++  _wave_hw_fast_path_set(hw, hw->dcdp_path_is_available);
++
+   MTLK_INIT_TRY(hw_mmb_card, MTLK_OBJ_PTR(hw))
+ #if CPTCFG_IWLWAV_TRACER_HISTORY_LENGTH
+     MTLK_INIT_STEP(hw_mmb_card, HW_TRACER_INIT, MTLK_OBJ_PTR(hw),
+@@ -9726,6 +9746,30 @@ _mtlk_hw_get_prop (mtlk_hw_t *hw, mtlk_hw_prop_e prop_id, void *buffer, uint32 s
+       res  = MTLK_ERR_OK;
+     }
+     break;
++  case MTLK_HW_RX_HDS_CUR_MSGS:
++    if (size == sizeof(uint32))
++    {
++      uint32 *val = (uint32 *)buffer;
++      *val = mtlk_ccr_ring_get_hds_to_process(hw->ccr, &hw->rx.ring.regs);
++      res  = MTLK_ERR_OK;
++    }
++    break;
++  case MTLK_HW_RX_HDS_LAST_READ_MSGS:
++    if (size == sizeof(uint32))
++    {
++      uint32 *val = (uint32 *)buffer;
++      *val = hw->rx_hds_last_read;
++      res  = MTLK_ERR_OK;
++    }
++    break;
++  case MTLK_HW_RX_HDS_LAST_PROCESSED_MSGS:
++    if (size == sizeof(uint32))
++    {
++      uint32 *val = (uint32 *)buffer;
++      *val = hw->rx_hds_last_processed;
++      res  = MTLK_ERR_OK;
++    }
++    break;
+   case MTLK_HW_FREE_TX_MSGS:
+     if (size == sizeof(uint32))
+     {
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/mtlk_df_user.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/mtlk_df_user.c
+index 2080cc0..a8b211e 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/mtlk_df_user.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/mtlk_df_user.c
+@@ -3057,7 +3057,7 @@ int _mtlk_df_user_get_tasklet_limits_by_intvec(const uint32 *intvec, uint16 intv
+     return MTLK_ERR_PARAMS;
+   }
+ 
+-  wave_memcpy(tl, sizeof(tl), intvec, sizeof(*tl));
++  wave_memcpy(tl, sizeof(*tl), intvec, sizeof(*tl));
+   return MTLK_ERR_OK;
+ }
+ 
+@@ -6518,6 +6518,9 @@ _mtlk_df_ui_print_driver_stats(mtlk_seq_entry_t *s, mtlk_core_general_stats_t *g
+   mtlk_aux_seq_printf(s, uint_fmt, general_stats->fw_logger_packets_processed, "FW logger packets processed");
+   mtlk_aux_seq_printf(s, uint_fmt, general_stats->fw_logger_packets_dropped, "FW logger packets dropped");
+ 
++  mtlk_aux_seq_printf(s, uint_fmt,  general_stats->rx_hds_cur, "RX current HD available");
++  mtlk_aux_seq_printf(s, uint_fmt,  general_stats->rx_hds_last_read, "RX HD last time read");
++  mtlk_aux_seq_printf(s, uint_fmt,  general_stats->rx_hds_last_processed, "RX HD last time processed");
+   mtlk_aux_seq_printf(s, uint_fmt,  general_stats->tx_msdus_free, "TX MSDUs free");
+   mtlk_aux_seq_printf(s, uint_fmt,  general_stats->tx_msdus_usage_peak, "TX MSDUs usage peak");
+ 
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/shared_mbss_mac/mhi_umi.h b/drivers/net/wireless/intel/iwlwav/wireless/shared_mbss_mac/mhi_umi.h
+index 6a3c9de..2d196fb 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/shared_mbss_mac/mhi_umi.h
++++ b/drivers/net/wireless/intel/iwlwav/wireless/shared_mbss_mac/mhi_umi.h
+@@ -321,6 +321,7 @@ typedef uint16 UMI_ACCESS_PROTOCOL;
+ #define GEN5_TX_RING_SIZE			(4096)
+ #define GEN35_TX_RING_SIZE			(1500)
+ #define GEN5_RX_RING_SIZE			(4096)
++#define SWPATH_RX_RING_SIZE			(10240)
+ #define GEN35_RX_RING_SIZE			(1500)
+ #define GEN5_MANG_TX_RING_SIZE		(128)
+ #define GEN5_MANG_RX_RING_SIZE		(128)
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/shared_mbss_mac/shram.h b/drivers/net/wireless/intel/iwlwav/wireless/shared_mbss_mac/shram.h
+index d9ee249..7e663ad 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/shared_mbss_mac/shram.h
++++ b/drivers/net/wireless/intel/iwlwav/wireless/shared_mbss_mac/shram.h
+@@ -472,6 +472,7 @@ typedef struct
+ 	uint32			u32BandConfiguration; /* 0x0 - single band / 0x1 - dual band / 0x2 - single band + scan on other band */
+ 	uint32			u32PCIeCardConfiguration; /* 0x0 - single PCIe / 0x1 - dual PCIe */
+ 	uint32			u32TestPlatformType; /* 0x0 - FPGA, 0x1 - PDXP (Palladium). this field is ignored when running on real chip */
++	uint32			u32IsFastPathAvailable; /* 0x0 - SW Path, 0x1 - Fast Path avaiable */
+ } __MTLK_PACKED VECTOR_AREA_CARD_CONFIGURATION_EXTENSION_DATA;
+ 
+ 
+-- 
+1.9.1
+
