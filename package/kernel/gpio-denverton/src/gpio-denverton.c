@@ -33,7 +33,8 @@
 #define DNV_PMODE_BITS 		0x1C00
 #define DNV_MAX_GPIO		4
 #define DNV_GPIO_BASE       	128
-#define DTA1161_BOARD_NAME	"DTA1161AC4"
+#define BOARD_NAME_DTA1161AC4	"DTA1161AC4"
+#define BOARD_NAME_DTA1161BC8	"DTA1161BC8"
 
 struct dnv_gpio_chip {
 	struct gpio_chip chip;
@@ -149,9 +150,9 @@ static void dnv_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 		break;
 	case 2:
 		if (value)
-			writel(data & ~DNV_GPIO_TX_MASK, reg);
-		else			
 			writel(data | DNV_GPIO_TX_MASK, reg);
+		else
+			writel(data & ~DNV_GPIO_TX_MASK, reg);
 		break;
 	default:
 		break;
@@ -254,7 +255,7 @@ static int __init dnv_gpio_init(void)
 	int err;	
  	const char *board_name = dmi_get_system_info(DMI_PRODUCT_NAME);
         
-    if(!strcmp(board_name, DTA1161_BOARD_NAME)) {            
+    if(!strcmp(board_name, BOARD_NAME_DTA1161AC4) || !strcmp(board_name, BOARD_NAME_DTA1161BC8)) {
                 	
 		dnv_gpio_pdev = platform_device_alloc(DRVNAME, -1);			
 		if (!dnv_gpio_pdev){

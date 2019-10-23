@@ -23,7 +23,8 @@
 
 #define LED_DEVNAME		"leds-gpio"
 #define BOARD_NAME_DTA1160	"DTA1160"
-#define BOARD_NAME_DTA1161	"DTA1161AC4"
+#define BOARD_NAME_DTA1161AC4	"DTA1161AC4"
+#define BOARD_NAME_DTA1161BC8	"DTA1161BC8"
 #define SYS_LED_NAME 		"SYS"
 #define CLOUD_LED_NAME		"CLOUD"
 #define LTE0_LED_NAME		"Lte_0"
@@ -115,7 +116,7 @@ static int __init dta116x_devices_init(void)
 
 	const char *board_name = dmi_get_system_info(DMI_PRODUCT_NAME);
 
-	if(!strcmp(board_name,BOARD_NAME_DTA1161)){
+	if(!strcmp(board_name,BOARD_NAME_DTA1161AC4) || !strcmp(board_name,BOARD_NAME_DTA1161BC8)){
 		platform_add_devices(dta1161_devices,
 				    ARRAY_SIZE(dta1161_devices));
 	}
