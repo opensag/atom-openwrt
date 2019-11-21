@@ -1,0 +1,24 @@
+From 805cb1d238e96ad88e6615192227eab6bd336ccf Mon Sep 17 00:00:00 2001
+From: Huajun Li <huajun.li@intel.com>
+Date: Wed, 19 Jun 2019 12:40:56 +0800
+Subject: [PATCH 1/1] fix build error
+
+---
+ dwpal_cli.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/dwpal_cli.c b/dwpal_cli.c
+index 9c79ff8..42122f3 100755
+--- a/dwpal_cli.c
++++ b/dwpal_cli.c
+@@ -8,6 +8,7 @@
+ #include <stdbool.h>
+ #include <stdlib.h>
+ #include <signal.h>
++#include <asm-generic/signal-defs.h>
+ #include <malloc.h>
+ #include <unistd.h>
+ #include <pthread.h>
+-- 
+2.7.4
+

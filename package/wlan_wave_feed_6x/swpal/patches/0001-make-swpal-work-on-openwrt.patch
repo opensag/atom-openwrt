@@ -1,0 +1,177 @@
+From f15a622a055b0fcf5970220d16bca6b302e5a956 Mon Sep 17 00:00:00 2001
+From: Huajun Li <huajun.li@intel.com>
+Date: Tue, 9 Jul 2019 08:56:10 +0800
+Subject: [PATCH 1/3] make swpal work on openwrt
+
+---
+ .../etc/hotplug.d/ieee80211/mac80211.hotplug       |  5 ++++
+ files/scripts/lib/netifd/debug_infrastructure.sh   |  6 ++---
+ files/scripts/lib/netifd/wireless/mac80211.sh      |  3 ++-
+ files/scripts/lib/wifi/mac80211.sh                 | 30 +++++++++++++++++++++-
+ files/scripts/lib/wifi/platform_dependent.sh       |  7 +++++
+ files/scripts/lib/wifi/platform_dependent_ugw.sh   |  7 -----
+ files/scripts/sbin/wifi                            |  2 +-
+ 7 files changed, 47 insertions(+), 13 deletions(-)
+ create mode 100644 files/scripts/etc/hotplug.d/ieee80211/mac80211.hotplug
+ mode change 100644 => 100755 files/scripts/lib/netifd/wireless/mac80211.sh
+ create mode 100644 files/scripts/lib/wifi/platform_dependent.sh
+ delete mode 100644 files/scripts/lib/wifi/platform_dependent_ugw.sh
+
+diff --git a/files/scripts/etc/hotplug.d/ieee80211/mac80211.hotplug b/files/scripts/etc/hotplug.d/ieee80211/mac80211.hotplug
+new file mode 100644
+index 0000000..b865552
+--- /dev/null
++++ b/files/scripts/etc/hotplug.d/ieee80211/mac80211.hotplug
+@@ -0,0 +1,5 @@
++#!/bin/sh
++
++[ "${ACTION}" = "add" ] && {
++	/sbin/wifi config
++}
+diff --git a/files/scripts/lib/netifd/debug_infrastructure.sh b/files/scripts/lib/netifd/debug_infrastructure.sh
+index 74bd698..887eff9 100644
+--- a/files/scripts/lib/netifd/debug_infrastructure.sh
++++ b/files/scripts/lib/netifd/debug_infrastructure.sh
+@@ -19,7 +19,7 @@ debug_infrastructure_append() {
+ 	local config_type="$2"
+ 
+ 	for i in $(seq 1 $number_of_debug_configs); do
+-		eval debug_config=( \"\${$config_name_prefix$i}\" )
++		eval debug_config=\"\${$config_name_prefix$i}\"
+ 		debug_config_value=$debug_config
+ 
+ 		if [ -n "$debug_config_value" ]; then
+@@ -33,11 +33,11 @@ debug_infrastructure_execute_iw_command(){
+ 	local radio_idx="$2"
+ 
+ 	for i in $(seq 1 $number_of_debug_configs); do
+-		eval debug_config=( \"\${$config_name_prefix$i}\" )
++		eval debug_config=\"\${$config_name_prefix$i}\"
+ 		debug_config_value=$debug_config
+ 
+ 		if [ -n "$debug_config_value" ]; then
+ 			eval "iw wlan$radio_idx iwlwav $debug_config_value"
+ 		fi
+ 	done
+-}
+\ No newline at end of file
++}
+diff --git a/files/scripts/lib/netifd/wireless/mac80211.sh b/files/scripts/lib/netifd/wireless/mac80211.sh
+old mode 100644
+new mode 100755
+index 78e8c61..3ab0ce4
+--- a/files/scripts/lib/netifd/wireless/mac80211.sh
++++ b/files/scripts/lib/netifd/wireless/mac80211.sh
+@@ -989,7 +989,8 @@ setup_reconf() {
+ 					debug_infrastructure_execute_iw_command debug_iw_pre_up_ $radio_index
+ 				fi
+ 
+-				/usr/sbin/hostapd -s"$hostapd_log_level" -P /var/run/wifi-$phy.pid -B "$hostapd_conf_file"
++				#/usr/sbin/hostapd -s"$hostapd_log_level" -P /var/run/wifi-$phy.pid -B "$hostapd_conf_file"
++				/usr/sbin/hostapd  -P /var/run/wifi-$phy.pid -B "$hostapd_conf_file"
+ 				ret="$?"
+ 
+ 				[ "$ret" != 0 ] && {
+diff --git a/files/scripts/lib/wifi/mac80211.sh b/files/scripts/lib/wifi/mac80211.sh
+index 39d0456..84946f9 100644
+--- a/files/scripts/lib/wifi/mac80211.sh
++++ b/files/scripts/lib/wifi/mac80211.sh
+@@ -76,6 +76,10 @@ detect_mac80211() {
+ 		config_foreach check_mac80211_device wifi-device
+ 		[ "$found" -gt 0 ] && continue
+ 
++		is_ap=0
++		iw phy "$dev" info | grep -q '* AP' && is_ap=1
++		[ "$is_ap" -eq 0 ] && continue
++
+ 		mode_band="g"
+ 		channel="11"
+ 		htmode=""
+@@ -109,12 +113,34 @@ detect_mac80211() {
+ 			dev_id="set wireless.radio${devidx}.macaddr=$(cat /sys/class/ieee80211/${dev}/macaddress)"
+ 		fi
+ 
++		ssid="wave_2.4g"
++		band_ind="2.4GHz"
++		ifname_ind="wlan0"
++		if [ ${mode_band} == 'a' ]; then
++			ssid="wave_5g"
++			band_ind="5GHz"
++		fi
++		[ ${dev} = 'phy0' ] || ifname_ind="wlan2"
++		#WA for mac address
++		mac_addr=$(iw dev wlan0 info | grep addr)
++		mac_addr=${mac_addr#* }
++		if [ "${ifname_ind}" == "wlan2" ]; then
++			local machex=$( echo "$mac_addr" | tr -d ':' )
++			local macdec=$( printf "%d\n" 0x$machex )
++			macdec=$( expr $macdec + 1)
++			machex=$( printf "%12x\n" $macdec )
++			mac_addr=$( echo $machex | sed 's/\(..\)/\1:/g;s/:$//' )
++		fi
++		pre_addr=${mac_addr}
++
+ 		uci -q batch <<-EOF
+ 			set wireless.radio${devidx}=wifi-device
+ 			set wireless.radio${devidx}.type=mac80211
+ 			set wireless.radio${devidx}.phy=${dev}
++			set wireless.radio${devidx}.country=US
+ 			set wireless.radio${devidx}.channel=${channel}
+ 			set wireless.radio${devidx}.hwmode=11${mode_band}
++			set wireless.radio${devidx}.band=${band_ind}
+ 			${dev_id}
+ 			${ht_capab}
+ 			set wireless.radio${devidx}.disabled=1
+@@ -123,7 +149,9 @@ detect_mac80211() {
+ 			set wireless.default_radio${devidx}.device=radio${devidx}
+ 			set wireless.default_radio${devidx}.network=lan
+ 			set wireless.default_radio${devidx}.mode=ap
+-			set wireless.default_radio${devidx}.ssid=LEDE
++			set wireless.default_radio${devidx}.ssid=${ssid}
++			set wireless.default_radio${devidx}.ifname=${ifname_ind}
++			set wireless.default_radio${devidx}.macaddr=${mac_addr}
+ 			set wireless.default_radio${devidx}.encryption=none
+ EOF
+ 		uci -q commit wireless
+diff --git a/files/scripts/lib/wifi/platform_dependent.sh b/files/scripts/lib/wifi/platform_dependent.sh
+new file mode 100644
+index 0000000..c302c21
+--- /dev/null
++++ b/files/scripts/lib/wifi/platform_dependent.sh
+@@ -0,0 +1,7 @@
++#!/bin/sh
++
++export OS_NAME="UGW"
++export BINDIR="/opt/intel/bin"
++export SCRIPTS_PATH="/opt/intel/wave/scripts"
++export ETC_CONFIG_WIRELESS_PATH="/etc/config/wireless"
++export DEV_CREAT_PATH="/dev"
+diff --git a/files/scripts/lib/wifi/platform_dependent_ugw.sh b/files/scripts/lib/wifi/platform_dependent_ugw.sh
+deleted file mode 100644
+index c302c21..0000000
+--- a/files/scripts/lib/wifi/platform_dependent_ugw.sh
++++ /dev/null
+@@ -1,7 +0,0 @@
+-#!/bin/sh
+-
+-export OS_NAME="UGW"
+-export BINDIR="/opt/intel/bin"
+-export SCRIPTS_PATH="/opt/intel/wave/scripts"
+-export ETC_CONFIG_WIRELESS_PATH="/etc/config/wireless"
+-export DEV_CREAT_PATH="/dev"
+diff --git a/files/scripts/sbin/wifi b/files/scripts/sbin/wifi
+index 392d3bd..fc0ce37 100644
+--- a/files/scripts/sbin/wifi
++++ b/files/scripts/sbin/wifi
+@@ -152,7 +152,7 @@ wifi_detect_notice() {
+ }
+ 
+ wifi_config() {
+-	[ ! -f $ETC_CONFIG_WIRELESS_PATH ] && touch &ETC_CONFIG_WIRELESS_PATH
++	[ ! -f /etc/config/wireless ] && touch /etc/config/wireless
+ 
+ 	for driver in $DRIVERS; do (
+ 		if eval "type detect_$driver" 2>/dev/null >/dev/null; then
+-- 
+2.7.4
+

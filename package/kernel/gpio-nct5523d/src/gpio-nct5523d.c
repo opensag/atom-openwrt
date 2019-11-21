@@ -52,7 +52,8 @@
 
 #define SIO_PCENGINES_APU_NCT5523D_ID	0xc453	/* Chip ID */
 
-#define DTA1161_BOARD_NAME      "DTA1161AC4"   /*DTA1161AC4  Product Name*/
+#define BOARD_NAME_DTA1161AC4      "DTA1161AC4"   /*DTA1161AC4  Product Name*/
+#define BOARD_NAME_DTA1161BC8      "DTA1161BC8"   /*DTA1161BC8  Product Name*/
 
 
 enum chips { nct5523d };
@@ -248,9 +249,9 @@ static int nct5523d_gpio_direction_out(struct gpio_chip *chip,
 
 	data_out = superio_inb(sio->addr, gpio_data(bank->regbase));
 	if (value)
-		data_out |= (1 << offset);
-	else
 		data_out &= ~(1 << offset);
+	else
+		data_out |= (1 << offset);
 	superio_outb(sio->addr, gpio_data(bank->regbase), data_out);
 
 	dir = superio_inb(sio->addr, gpio_dir(bank->regbase));
@@ -277,9 +278,9 @@ static void nct5523d_gpio_set(struct gpio_chip *chip, unsigned offset, int value
 
 	data_out = superio_inb(sio->addr, gpio_data(bank->regbase));
 	if (value)
-		data_out |= (1 << offset);
-	else
 		data_out &= ~(1 << offset);
+	else
+		data_out |= (1 << offset);
 	superio_outb(sio->addr, gpio_data(bank->regbase), data_out);
 
 	superio_exit(sio->addr);
@@ -461,7 +462,7 @@ static int __init nct5523d_gpio_init(void)
 	int err;
 	struct nct5523d_sio sio;
 	const char *board_name = dmi_get_system_info(DMI_PRODUCT_NAME);			
-	if(!strcmp(board_name, DTA1161_BOARD_NAME)) {	 
+	if(!strcmp(board_name, BOARD_NAME_DTA1161AC4) || !strcmp(board_name, BOARD_NAME_DTA1161BC8)) {
 		if (nct5523d_find(0x2e, &sio) && nct5523d_find(0x4e, &sio))
 			return -ENODEV;
 

@@ -1,0 +1,75 @@
+#How to run regression 
+# In git-bash shell:
+cd /c/MBO-PF/UCC/bin
+/c/WFA_Sigma_Test_Suite/files/regression-wts-mbo.sh
+
+#Bridge
+clish -c "configure lan" -c "set interface br-lan ip 192.168.1.3" 
+brctl addif br-lan wlan0
+brctl addif br-lan wlan1
+
+#################################################
+
+#### How to test Sigma APIs without UCC: 
+# On device:
+cd /opt/lantiq/wave/scripts
+./sigma-start.sh
+
+# On PC:
+Open Putty, new session.
+Host name: 
+	AP's IP
+Port: 
+	9000
+Connection type: 
+	Raw
+
+# Copy-paste UCC command without prefix/suffix, and replacing variables with values.
+e.g. In UCC:
+wfa_control_agent_dut!ap_set_wireless,NAME,$DUT_Name,CHANNEL,$Channel,SSID,$SSID,MODE,$Band,width,$APChannelWidth,DOMAIN,0101,FT_OA,Enable!DEFAULT
+
+In Putty:
+ap_set_wireless,NAME,IntelAP,Channel,36,SSID,WiFi1-4.2.5.1,Mode,11ac,width,20,DOMAIN,0101,FT_OA,Enable
+
+(Shortcut: If you have a UCC log, you can copy from it the lines with the variables converted to values)
+
+#################################################
+
+#FT
+
+clish -c "configure wlan" -c "start" 
+-c "set radio wlan1 Channel 36 OperatingStandards a,n,ac AutoChannelEnable 0 OperatingFrequencyBand 5GHz OperatingChannelBandwidth 20MHz " \
+-c "set ssid wlan1 SSID WiFi1-4.2.6" \
+-c "set ap security wlan1  ModeEnabled WPA2-Personal KeyPassphrase MBORocks ManagementFrameProtection 1" \
+-c "commit"
+
+clish -c "configure wlan" -c "start" \
+-c "set ap wlan1 dot11FTMobilityDomainID 0101 " \
+-c "set ap security wlan1 \
+NASIdentifierAp grx550-ap1.intel.com \
+InterAccessPointProtocol br-lan \
+FTKeyManagment FT-PSK \
+FTOverDS false \
+FastTransionSupport true \
+NASIdentifier1 grx550-ap2.intel.com \
+dot11FTR1KeyHolderID 000909098670 \
+R0KH1MACAddress 00:09:86:86:86:70 \
+R0KH1key 0f0e0d0c0b0a09080706050403020100 \
+R1KH1MACAddress 00:09:86:86:86:70 \
+R1KH1Id 00:09:86:86:86:70 \
+R1KH1key 000102030405060708090a0b0c0d0e0f " \
+-c "commit"
+
+#Build Server Version
+/tmp2/sannikov/UGW_Builder/2017_03_12__18_19_00_332796512_tmp/built_7.1.1_beerock_20160825T172600+0300
+
+
+#Latest ISAR VERSION INSRUCTIONS
+
+please use \\tlvsdn50.lantiq.com\groups\CombinedVersions\0-WLS_Versions\Integration\05.03.00\05.03.00.49_BeeRock
+With libraries:
+\\tlvsdn50.lantiq.com\groups\0\For_Adit\Libraries\05.03.00.49_BeeRock\Ver_8
+
+killall fapi_wlan_beerock_cli
+cd /usr/lib; tftp -gr libfapiwlancommon.so 192.168.1.100; tftp -gr fapi_wlan_beerock_cli 192.168.1.100; chmod +x fapi_wlan_beerock_cli; cd -;
+cd /opt/lantiq/lib; tftp -gr libfapiwave.so 192.168.1.100; cd -;

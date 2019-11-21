@@ -1,0 +1,93 @@
+From 2acba13f6436bad3700d231410adb2ff61b68347 Mon Sep 17 00:00:00 2001
+From: yangche1 <stellate.yang@intel.com>
+Date: Wed, 17 Jul 2019 19:07:06 +0800
+Subject: [PATCH 2/3] Bring up 4 VAPS per band by default
+
+Signed-off-by: yangche1 <stellate.yang@intel.com>
+---
+ files/db/etc/wave/db/wireless_def_vap_10           |  2 --
+ files/db/etc/wave/db/wireless_def_vap_42           |  2 --
+ .../etc/hotplug.d/ieee80211/mac80211.hotplug       | 24 +++++++++++++++++++++-
+ .../scripts/etc/wave/scripts/wave_factory_reset.sh |  6 +++---
+ 4 files changed, 26 insertions(+), 8 deletions(-)
+ delete mode 100644 files/db/etc/wave/db/wireless_def_vap_10
+ delete mode 100644 files/db/etc/wave/db/wireless_def_vap_42
+
+diff --git a/files/db/etc/wave/db/wireless_def_vap_10 b/files/db/etc/wave/db/wireless_def_vap_10
+deleted file mode 100644
+index 7307865..0000000
+--- a/files/db/etc/wave/db/wireless_def_vap_10
++++ /dev/null
+@@ -1,2 +0,0 @@
+-        option wps_pushbutton '1'
+-        option wps_rf_bands 'a'
+\ No newline at end of file
+diff --git a/files/db/etc/wave/db/wireless_def_vap_42 b/files/db/etc/wave/db/wireless_def_vap_42
+deleted file mode 100644
+index bfc2bc4..0000000
+--- a/files/db/etc/wave/db/wireless_def_vap_42
++++ /dev/null
+@@ -1,2 +0,0 @@
+-        option wps_pushbutton '1'
+-        option wps_rf_bands 'g'
+\ No newline at end of file
+diff --git a/files/scripts/etc/hotplug.d/ieee80211/mac80211.hotplug b/files/scripts/etc/hotplug.d/ieee80211/mac80211.hotplug
+index b865552..bc33652 100644
+--- a/files/scripts/etc/hotplug.d/ieee80211/mac80211.hotplug
++++ b/files/scripts/etc/hotplug.d/ieee80211/mac80211.hotplug
+@@ -1,5 +1,27 @@
+ #!/bin/sh
+ 
++UCI_WAV_DB=/etc/config/wireless
++WIFI_FACTORY_CMD=/etc/wave/scripts/wave_factory_reset.sh
++
+ [ "${ACTION}" = "add" ] && {
+-	/sbin/wifi config
++	radios=`ifconfig -a | grep "wlan[0|2|4] " | awk '{ print $1 }'`
++	if [ -z "$radios" ]; then
++		exit 1
++	fi
++
++	if [ -s "$UCI_WAV_DB" ]; then
++		db_radios=`cat ${UCI_WAV_DB} | grep "wlan[0|2|4]" | awk '{ print $3 }'`
++		db_radios=`echo $db_radios | sed $'s/\'//g'`
++		for radio in $radios; do
++			result=`echo $db_radios | grep "${radio}"`
++			if [ -z "$result" ]; then
++				${WIFI_FACTORY_CMD}
++				exit 0
++			fi
++		done
++
++		exit 0
++        fi
++
++	${WIFI_FACTORY_CMD}
+ }
+diff --git a/files/scripts/etc/wave/scripts/wave_factory_reset.sh b/files/scripts/etc/wave/scripts/wave_factory_reset.sh
+index e62c9f5..0e6e3a7 100755
+--- a/files/scripts/etc/wave/scripts/wave_factory_reset.sh
++++ b/files/scripts/etc/wave/scripts/wave_factory_reset.sh
+@@ -4,7 +4,7 @@
+ # This script performs wifi factory reet
+ #
+ 
+-UCI_DB_PATH=/nvram/etc/config
++UCI_DB_PATH=/etc/config
+ DEFAULT_DB_PATH=/etc/wave/db/
+ DEFAULT_DB_RADIO_5=$DEFAULT_DB_PATH/wireless_def_radio_5g
+ DEFAULT_DB_RADIO_24=$DEFAULT_DB_PATH/wireless_def_radio_24g
+@@ -74,8 +74,8 @@ update_mac_address()
+                         echo "$0: Check the ITstore Production settings and get the correct Mac address" > /dev/console
+                         board_mac="00:50:F1:80:00:00"
+                 fi
+-        elif [ -e "/nvram/etc/wave/wav_base_mac" ]; then
+-                source /nvram/etc/wave/wav_base_mac
++        elif [ -e "/etc/wave/wav_base_mac" ]; then
++                source /etc/wave/wav_base_mac
+                 board_mac=${board_mac##*HWaddr }
+                 board_mac=${board_mac%% *}
+         else
+-- 
+2.7.4
+

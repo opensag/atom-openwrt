@@ -1,0 +1,166 @@
+From e89f4409678ae960000ee08e087c701395171ab9 Mon Sep 17 00:00:00 2001
+From: Huajun Li <huajun.li@intel.com>
+Date: Mon, 22 Jul 2019 15:34:01 +0800
+Subject: [PATCH 3/3] add AP postup commands to get the best performance
+
+---
+ files/scripts/lib/netifd/wireless/mac80211.sh | 138 ++++++++++++++++++++++++++
+ 1 file changed, 138 insertions(+)
+
+diff --git a/files/scripts/lib/netifd/wireless/mac80211.sh b/files/scripts/lib/netifd/wireless/mac80211.sh
+index 3ab0ce4..0915ee5 100755
+--- a/files/scripts/lib/netifd/wireless/mac80211.sh
++++ b/files/scripts/lib/netifd/wireless/mac80211.sh
+@@ -1017,6 +1017,9 @@ setup_reconf() {
+ 				if [ -f /lib/netifd/debug_infrastructure.sh ]; then
+ 					debug_infrastructure_execute_iw_command debug_iw_post_up_ $radio_index
+ 				fi
++
++				### AccessPoint post-up commands ###
++				ap_postup_cmd
+ 			}
+ 		;;
+ 		*)
+@@ -1062,4 +1065,139 @@ drv_mac80211_teardown() {
+ 	mac80211_interface_cleanup "$phy"
+ }
+ 
++ap_postup_cmd() {
++	local wave=""
++	json_select config
++	json_get_vars ifname band
++
++	[ -n "$ifname" ] || ifname="wlan${phy#phy}"
++	if [ $ifname = "wlan1" ]; then
++		#adjust ifname for wav654
++		ifname="wlan2"
++	fi
++	if [ $ifname != "wlan0" && $ifname != "wlan2" ]; then
++		return
++	fi
++
++	pci_count=`lspci | grep -c '1bef:0810'`
++	if [ $pci_count -gt 0 ]; then
++		wave="500b"
++	fi
++	pci_count=`lspci | grep -c '8086:09d0'`
++	if [ $pci_count -gt 0 ]; then
++		wave="600"
++	fi
++	if [ $wave != "500b" || $wave != "600" ]; then
++		echo "Unknown wave defice!"
++		return
++	fi
++
++	### Wait for hostapd_cli state to be ENABLED or ACS_DONE ###
++	loop=0
++	echo "Waiting for hostapd radio interface to be ready."
++	while [ $loop -lt 100 ]
++	do
++		[ $((loop%10)) -eq 0 ] && echo "Waiting for $ifname to be ready"
++		[ $loop -eq 99 ] && echo "hostapd_cli state didn't change to ENABLED or ACS_DONE for $ifname'!, hostapd may not be up!"
++		found_enabled=`hostapd_cli -i $ifname status 2>/dev/null | grep state=ENABLED -c`
++		found_acs_done=`hostapd_cli -i $ifname status 2>/dev/null | grep state=ACS_DONE -c`
++		found=$((found_enabled+found_acs_done))
++		if [ $found -eq 1 ]
++		then
++			loop=100
++		else
++			sleep 1
++			loop=$((loop+1))
++		fi
++	done
++
++	### AccessPoint post-up commands ###
++	echo "Set post-up commands:    wave: $wave, band: $band, ifname: $ifname"
++	if [ "$wave" = "500b" ]; then
++		if [ "$band" = "2.4GHz" ]; then
++			iw $ifname iwlwav sCoCPower 0 4 4
++			iw $ifname iwlwav sEnableRadio 1
++			iw $ifname iwlwav sPCoCPower 1
++			iw $ifname iwlwav sPCoCAutoCfg 125 10000 1024000 2048000
++			iw $ifname iwlwav sTxopConfig 255 1
++			iw $ifname iwlwav sAcsUpdateTo 0
++			iw $ifname iwlwav sRTSmode 0 0
++			iw $ifname iwlwav sFixedRateCfg 255 1 1 2 1 0 1
++			iw $ifname iwlwav sInterfDetThresh -68 -68 -68 -68 5 -68
++			iw $ifname iwlwav sCcaAdapt 10 5 -30 10 5 30 60
++			iw $ifname iwlwav sFastDrop 0
++			iw $ifname iwlwav sAPforwarding 1
++			iw $ifname iwlwav sReliableMcast 1
++			iw $ifname iwlwav sBridgeMode 0
++			iw $ifname iwlwav sFourAddrMode 0
++			iw $ifname iwlwav sAggrConfig 1 1
++			iw $ifname iwlwav s11nProtection 1
++		elif [ "$band" = "5GHz" ]; then
++			iw $ifname iwlwav sCoCPower 0 4 4
++			iw $ifname iwlwav sEnableRadio 1
++			iw $ifname iwlwav sPCoCPower 1
++			iw $ifname iwlwav sPCoCAutoCfg 125 10000 1024000 2048000
++			iw $ifname iwlwav sTxopConfig 255 1
++			iw $ifname iwlwav sRadarRssiTh -62
++			iw $ifname iwlwav sAcsUpdateTo 0
++			iw $ifname iwlwav sRTSmode 0 0
++			iw $ifname iwlwav sFixedRateCfg 255 1 2 3 1 0 1
++			iw $ifname iwlwav sInterfDetThresh -68 -68 -68 -68 5 -68
++			iw $ifname iwlwav sCcaAdapt 10 5 -30 10 5 30 60
++			iw $ifname iwlwav sFastDrop 0
++			iw $ifname iwlwav sAPforwarding 1
++			iw $ifname iwlwav sReliableMcast 1
++			iw $ifname iwlwav sBridgeMode 0
++			iw $ifname iwlwav sFourAddrMode 0
++			iw $ifname iwlwav sAggrConfig 1 1
++			iw $ifname iwlwav s11nProtection 1
++			iw $ifname iwlwav sNumMsduInAmsdu 2 2 2
++			iw $ifname iwlwav sMaxMpduLen 7000
++		fi
++	elif [ "$wave" = "600" ]; then
++		if [ "$band" = "2.4GHz" ]; then
++			iw $ifname iwlwav sCoCPower 0 2 2
++			iw $ifname iwlwav sEnableRadio 1
++			iw $ifname iwlwav sTxopConfig 511 2
++			iw $ifname iwlwav sAcsUpdateTo 605000000
++			iw $ifname iwlwav sRTSmode 0 0
++			iw $ifname iwlwav sFixedRateCfg 511 1 1 4 1 7 1 0 0 0 2
++			iw $ifname iwlwav sInterfDetThresh -68 -68 -68 -68 5 -68
++			iw $ifname iwlwav sCcaAdapt 10 5 -62 10 5 30 60
++			iw $ifname iwlwav sFastDrop 0
++			iw $ifname iwlwav sFixedLtfGi 1 0
++			iw $ifname iwlwav sMuStatPlanCfg 0 32000 1 0 0 0 0 0 2700 26 2 2 2 2 2 3334 3 0 0 255 1 255
++			iw $ifname iwlwav sHeMuOperation 0
++			iw $ifname iwlwav sEnableTestBus 1
++			iw $ifname iwlwav s11hRadarDetect 0
++			iw $ifname iwlwav sAPforwarding 1
++			iw $ifname iwlwav sReliableMcast 1
++			iw $ifname iwlwav sBridgeMode 0
++			iw $ifname iwlwav sFourAddrMode 0
++			iw $ifname iwlwav s11nProtection 1
++		elif [ "$band" = "5GHz" ]; then
++			iw $ifname iwlwav sCoCPower 0 2 2
++			iw $ifname iwlwav sEnableRadio 1
++			iw $ifname iwlwav sTxopConfig 511 2
++			iw $ifname iwlwav sRadarRssiTh -70
++			iw $ifname iwlwav sAcsUpdateTo 605000000
++			iw $ifname iwlwav sRTSmode 0 0
++			iw $ifname iwlwav sFixedRateCfg 511 1 1 4 1 7 1 0 0 0 2
++			iw $ifname iwlwav sInterfDetThresh -68 -68 -68 -68 5 -68
++			iw $ifname iwlwav sCcaAdapt 10 5 -62 10 5 30 60
++			iw $ifname iwlwav sFastDrop 0
++			iw $ifname iwlwav sFixedLtfGi 1 0
++			iw $ifname iwlwav sMuStatPlanCfg 0 32000 1 2 0 0 0 0 2700 26 2 2 2 2 2 3334 3 0 0 255 1 255
++			iw $ifname iwlwav sHeMuOperation 0
++			iw $ifname iwlwav sEnableTestBus 1
++			iw $ifname iwlwav s11hRadarDetect 0
++			iw $ifname iwlwav sAPforwarding 1
++			iw $ifname iwlwav sReliableMcast 1
++			iw $ifname iwlwav sBridgeMode 0
++			iw $ifname iwlwav sFourAddrMode 0
++			iw $ifname iwlwav s11nProtection 1
++		fi
++	fi
++}
++
+ add_driver mac80211
+-- 
+2.7.4
+

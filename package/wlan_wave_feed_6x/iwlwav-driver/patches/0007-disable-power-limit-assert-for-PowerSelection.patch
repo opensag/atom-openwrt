@@ -1,0 +1,46 @@
+From 9b04b77dd2fc735fc405d059fde97313566fe209 Mon Sep 17 00:00:00 2001
+From: jialelux <jialex.lu@intel.com>
+Date: Thu, 22 Aug 2019 02:10:14 +0800
+Subject: [PATCH 7/7] disable power limit assert for PowerSelection
+
+Signed-off-by: jialelux <jialex.lu@intel.com>
+---
+ drivers/net/wireless/intel/iwlwav/wireless/driver/core.c         | 5 -----
+ drivers/net/wireless/intel/iwlwav/wireless/driver/mtlk_df_user.c | 5 -----
+ 2 files changed, 10 deletions(-)
+
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c
+index 6dcc414..f6aae8e 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c
+@@ -6356,11 +6356,6 @@ _mtlk_core_send_tx_power_limit_offset (mtlk_core_t *core, const uint32 power_lim
+     wave_radio_t            *radio = wave_vap_radio_get(core->vap_handle);
+     int                     res;
+ 
+-    MTLK_ASSERT(((power_limit == 0) ||
+-                 (power_limit == 3) ||
+-                 (power_limit == 6) ||
+-                 (power_limit == 9)));
+-
+     /* Power settings are determined by peer AP configuration. Therefore TX power cannot be set
+      * in case there are station mode interfaces unless FW recovery is in progress */
+     if (wave_radio_get_sta_vifs_exist(radio) && !mtlk_core_rcvry_is_running(core)) {
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/mtlk_df_user.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/mtlk_df_user.c
+index a8b211e..edd5d2a 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/mtlk_df_user.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/mtlk_df_user.c
+@@ -3498,11 +3498,6 @@ _mtlk_df_user_get_text_by_mcast_range (char *buffer, mtlk_mcast_range_vect_cfg_t
+ static int
+ _mtlk_df_user_fill_tx_power_lim_cfg(mtlk_tx_power_lim_cfg_t *cfg, uint32 data)
+ {
+-    if ((data!=0) && (data!=3) && (data!=6) && (data!=9)) {
+-        ELOG_D("Incorrect TX power limit value %u", data);
+-        return MTLK_ERR_VALUE;
+-    }
+-
+     cfg->powerLimitOffset = (uint8)data;
+     return MTLK_ERR_OK;
+ }
+-- 
+1.9.1
+

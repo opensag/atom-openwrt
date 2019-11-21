@@ -1,0 +1,1372 @@
+From 87435473f63cf07939f4617b126d2de7f38dd563 Mon Sep 17 00:00:00 2001
+From: Huajun Li <huajun.li@intel.com>
+Date: Wed, 28 Aug 2019 12:52:16 +0800
+Subject: [PATCH 5/7] WLANRTSYS-12726 statistics infra updates
+
+cherry pick patch from:
+https://gts-chd.intel.com/rest/patch/1.0/projects/SW_WAVE/repos/iwlwav-dev/pull-requests/451/patch
+---
+ .../wireless/intel/iwlwav/wireless/driver/core.c   |    2 +-
+ .../wireless/intel/iwlwav/wireless/driver/hw_mmb.c | 1043 ++++++++++----------
+ .../wireless/intel/iwlwav/wireless/driver/hw_mmb.h |    2 +-
+ .../intel/iwlwav/wireless/driver/scan_support.c    |    4 +-
+ .../wireless/intel/iwlwav/wireless/driver/stadb.h  |   44 +-
+ .../wireless/intel/iwlwav/wireless/driver/txmm.c   |    2 +
+ 6 files changed, 528 insertions(+), 569 deletions(-)
+
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c
+index a0d5064..dea5716 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/core.c
+@@ -13503,7 +13503,7 @@ _mtlk_core_get_statistics (mtlk_core_t *nic, mtlk_hw_t *hw)
+ {
+   if (NET_STATE_CONNECTED == mtlk_core_get_net_state(nic)) {
+     mtlk_hw_set_stats_available(hw, TRUE);
+-    return _mtlk_hw_get_statistics(hw);
++    return mtlk_hw_get_statistics(hw);
+   }
+     return MTLK_ERR_OK;
+ 
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c
+index e31c8e3..1469f10 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.c
+@@ -153,13 +153,81 @@
+ 
+ #define MTLK_INTERRUPT_RECOVERY_PERIOD  50
+ 
+-#define MTLK_STATS_DATA_OFFSET(parameter, id) ((_chipid_is_gen6_a0(id)) ? \
+-(hw_stats->stats_data + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600, parameter)) \
+-: (hw_stats->stats_data + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, parameter)))
+-
+-#define MTLK_STATS_COPY_OFFSET(parameter, id) ((_chipid_is_gen6_a0(id)) ? \
+-(hw_stats->stats_copy + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600, parameter)) \
+-: (hw_stats->stats_copy + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, parameter)))
++#define MTLK_GET_STATS_ADDRESS(stats, parameter, id) ((_chipid_is_gen6_a0(id)) ? \
++MTLK_GET_STATS_ADDRESS_A0(stats, parameter) : MTLK_GET_STATS_ADDRESS_B0(stats, parameter))
++
++#define MTLK_GET_STATS_ADDRESS_A0(stats, parameter) \
++(&(((StatisticsDb_t_wave600*)stats)->parameter))
++
++#define MTLK_GET_STATS_ADDRESS_B0(stats, parameter) \
++(&(((StatisticsDb_t_wave600b*)stats)->parameter))
++
++#define MTLK_GET_STATS(stats, parameter, id) ((_chipid_is_gen6_a0(id)) ?\
++ MTLK_GET_STATS_A0(stats, parameter) : MTLK_GET_STATS_B0(stats, parameter))
++
++#define MTLK_GET_STATS_A0(stats, parameter) \
++(((StatisticsDb_t_wave600*)stats)->parameter)
++
++#define MTLK_GET_STATS_B0(stats, parameter) \
++(((StatisticsDb_t_wave600b*)stats)->parameter)
++
++#define MTLK_CONVERT_ENDIANESS(stats, parameter, id) ((_chipid_is_gen6_a0(id)) ?\
++ MTLK_CONVERT_ENDIANESS_A0(stats, parameter) : MTLK_CONVERT_ENDIANESS_B0(stats, parameter))
++
++#define MTLK_CONVERT_ENDIANESS_A0(stats, parameter) \
++(MTLK_GET_STATS_A0(stats, parameter) = MAC_TO_HOST32(MTLK_GET_STATS_A0(stats, parameter)))
++
++#define MTLK_CONVERT_ENDIANESS_B0(stats, parameter) \
++(MTLK_GET_STATS_B0(stats, parameter) = MAC_TO_HOST32(MTLK_GET_STATS_B0(stats, parameter)))
++
++#define MTLK_GET_STATS_SIZE(_stats, _array, id) ((_chipid_is_gen6_a0(id)) ?\
++(sizeof(MTLK_GET_STATS_A0(_stats, _array))) : (sizeof(MTLK_GET_STATS_B0(_stats, _array))))
++
++#define MTLK_GET_STATS_ARRAY_SIZE_16(_stats, _array, id) \
++({ size_t size; \
++ if (_chipid_is_gen6_a0(id)) { \
++    MTLK_STATIC_ASSERT(0 == (sizeof(MTLK_GET_STATS_A0(_stats, _array))% sizeof(uint16))); \
++    size = sizeof(MTLK_GET_STATS_A0(_stats, _array)); \
++ } else { \
++    MTLK_STATIC_ASSERT(0 == (sizeof(MTLK_GET_STATS_B0(_stats, _array))% sizeof(uint16))); \
++    size = sizeof(MTLK_GET_STATS_B0(_stats, _array)); \
++ } \
++ size; \
++})
++
++#define MTLK_GET_STATS_ARRAY_SIZE_32(_stats, _array, id) \
++({ size_t size; \
++ if (_chipid_is_gen6_a0(id)) { \
++    MTLK_STATIC_ASSERT(0 == (sizeof(MTLK_GET_STATS_A0(_stats, _array))% sizeof(uint32))); \
++    size = sizeof(MTLK_GET_STATS_A0(_stats, _array));\
++ } else { \
++    MTLK_STATIC_ASSERT(0 == (sizeof(MTLK_GET_STATS_B0(_stats, _array))% sizeof(uint32))); \
++    size = sizeof(MTLK_GET_STATS_B0(_stats, _array)); \
++ } \
++ size; \
++})
++
++#define MTLK_GET_STATS_ARRAY_SIZE_64(_stats, _array, id) \
++({ size_t size; \
++ if (_chipid_is_gen6_a0(id)) { \
++    MTLK_STATIC_ASSERT(0 == (sizeof(MTLK_GET_STATS_A0(_stats, _array))% sizeof(uint64))); \
++    size = sizeof(MTLK_GET_STATS_A0(_stats, _array)); \
++ } else { \
++    MTLK_STATIC_ASSERT(0 == (sizeof(MTLK_GET_STATS_B0(_stats, _array))% sizeof(uint64))); \
++    size = sizeof(MTLK_GET_STATS_B0(_stats, _array)); \
++ } \
++ size; \
++})
++
++
++#define MTLK_CONVERT_ENDIANESS_ARRAY_16(_stats, _array, _chip_id) \
++__mtlk_convert_endianess_array_uint16((uint16*)MTLK_GET_STATS_ADDRESS(_stats, _array, chip_id), MTLK_GET_STATS_ARRAY_SIZE_16(_stats, _array, chip_id))
++
++#define MTLK_CONVERT_ENDIANESS_ARRAY_32(_stats, _array, _chip_id) \
++__mtlk_convert_endianess_array_uint32((uint32*)MTLK_GET_STATS_ADDRESS(_stats, _array, chip_id), MTLK_GET_STATS_ARRAY_SIZE_32(_stats, _array, chip_id))
++
++#define MTLK_CONVERT_ENDIANESS_ARRAY_64(_stats, _array, _chip_id) \
++__mtlk_convert_endianess_array_uint64((uint64*)MTLK_GET_STATS_ADDRESS(_stats, _array, chip_id), MTLK_GET_STATS_ARRAY_SIZE_64(_stats, _array, chip_id))
+ 
+ typedef struct
+ {
+@@ -5773,9 +5841,9 @@ _mtlk_hw_mhi_update_hw_stats (mtlk_hw_t *hw, hw_statistics_t *hw_stats)
+     for (radio_idx = 0; radio_idx < hw->radio_descr->num_radios; radio_idx++) {
+       for (cbw = 0; cbw < PHY_STAT_RATE_CBW_NUM; cbw++) {
+         hw_stats->tx_power[radio_idx].pw_min_ant[cbw] =
+-              STAT_PW_TO_POWER(*(unsigned char *)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.minPower[radio_idx][cbw], chip_id)));
++              STAT_PW_TO_POWER(MTLK_GET_STATS(hw_stats->stats_copy, linkAdaptationStats.minPower[radio_idx][cbw], chip_id));
+         hw_stats->tx_power[radio_idx].pw_max_ant[cbw] =
+-              STAT_PW_TO_POWER(*(unsigned char *)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.maxPower[radio_idx][cbw], chip_id)));
++              STAT_PW_TO_POWER(MTLK_GET_STATS(hw_stats->stats_copy, linkAdaptationStats.maxPower[radio_idx][cbw], chip_id));
+       }
+     }
+     mtlk_osal_lock_release(&hw_stats->lock);
+@@ -6156,75 +6224,76 @@ mtlk_hw_mhi_get_vap_stats (mtlk_hw_t *hw, mtlk_mhi_stats_vap_t *cntrs, unsigned
+ void __MTLK_IFUNC
+ mtlk_hw_mhi_get_vap_stats (mtlk_hw_t *hw, mtlk_mhi_stats_vap_t *vap_stats, unsigned vap_id)
+ {
+-    hw_statistics_t        *hw_stats;
+-    int                     chip_id = __hw_mmb_get_chip_id(hw);
++  hw_statistics_t        *hw_stats;
++  int                     chip_id = __hw_mmb_get_chip_id(hw);
++  mtlk_vap_stats         *stats;
+ 
+-    MTLK_ASSERT(hw);
+-    MTLK_ASSERT(vap_id < hw->max_vaps_fw); /* max_vaps for card */
++  MTLK_ASSERT(hw);
++  MTLK_ASSERT(vap_id < hw->max_vaps_fw); /* max_vaps for card */
+ 
+-    hw_stats = &hw->hw_stats;
++  hw_stats = &hw->hw_stats;
++  stats = &vap_stats->stats;
+ 
+-    mtlk_osal_lock_acquire(&hw_stats->lock);
+-    vap_stats->stats.txInUnicastHd = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].txInUnicastHd, chip_id));
+-    vap_stats->stats.txInMulticastHd = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].txInMulticastHd, chip_id));
+-    vap_stats->stats.txInBroadcastHd = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].txInBroadcastHd, chip_id));
+-    vap_stats->stats.txInUnicastNumOfBytes = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].txInUnicastNumOfBytes, chip_id));
+-    vap_stats->stats.txInMulticastNumOfBytes = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].txInMulticastNumOfBytes, chip_id));
+-    vap_stats->stats.txInBroadcastNumOfBytes = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].txInBroadcastNumOfBytes, chip_id));
+-    vap_stats->stats.rxOutUnicastHd = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].rxOutUnicatHd, chip_id));
+-    vap_stats->stats.rxOutMulticastHd = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].rxOutMulticastHd, chip_id));
+-    vap_stats->stats.rxOutBroadcastHd = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].rxOutBroadcastHd, chip_id));
+-    vap_stats->stats.rxOutUnicastNumOfBytes = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].rxOutUnicastNumOfBytes, chip_id));
+-    vap_stats->stats.rxOutMulticastNumOfBytes = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].rxOutMulticastNumOfBytes, chip_id));
+-    vap_stats->stats.rxOutBroadcastNumOfBytes = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].rxOutBroadcastNumOfBytes, chip_id));
+-    vap_stats->stats.agerCount = *(uint32*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.vapCounts[vap_id].agerCount, chip_id));
+-
+-    vap_stats->stats.dropMpdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.rxppVapCounts[vap_id].dropMpdu, chip_id));
+-    vap_stats->stats.mpduUnicastOrMngmnt = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.rxppVapCounts[vap_id].mpduUnicastOrMngmnt, chip_id));
+-    vap_stats->stats.mpduRetryCount = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.rxppVapCounts[vap_id].mpduRetryCount, chip_id));
+-    vap_stats->stats.amsdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.vapCounts[vap_id].amsdu, chip_id));
+-    vap_stats->stats.mpduTypeNotSupported = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.rxppVapCounts[vap_id].mpduTypeNotSupported, chip_id));
+-    vap_stats->stats.replayData = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.rxppVapCounts[vap_id].replayData, chip_id));
+-    vap_stats->stats.replayMngmnt = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.rxppVapCounts[vap_id].replayMngmnt, chip_id));
+-    if (_chipid_is_gen6_a0(chip_id)) {
+-      vap_stats->stats.tkipCount = *(uint32*)( hw_stats->stats_copy + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600, rxCounters.rxppVapCounts[vap_id].tkipCount));
+-      vap_stats->stats.securityFailure = *(uint32*)( hw_stats->stats_copy + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600, rxCounters.rxppVapCounts[vap_id].securityFailure));
+-    } else /* if(_chipid_is_gen6_b0(chip_id)) */ { /* all others: b0 and d2 */
+-      vap_stats->stats.tkipCount = *(uint32*)( hw_stats->stats_copy + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, rxCounters.vapCounts[vap_id].tkipCount));
+-      vap_stats->stats.securityFailure = *(uint32*)( hw_stats->stats_copy + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, rxCounters.vapCounts[vap_id].securityFailure));
+-    }
+-
+-    vap_stats->stats.amsduBytes = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.vapCounts[vap_id].amsduBytes, chip_id));
+-    vap_stats->stats.ampdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.rxppVapCounts[vap_id].ampdu, chip_id));
+-    vap_stats->stats.mpduInAmpdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.vapCounts[vap_id].mpduInAmpdu, chip_id));
+-    vap_stats->stats.octetsInAmpdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.vapCounts[vap_id].octetsInAmpdu, chip_id));
+-    vap_stats->stats.rxClassifierSecurityMismatch = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.vapCounts[vap_id].rxCoordinatorSecurityMismatch, chip_id));
+-    vap_stats->stats.bcMcCountVap = *(uint32*)(MTLK_STATS_COPY_OFFSET(rxCounters.rxppVapCounts[vap_id].bcMcCountVap, chip_id));
+-
+-    vap_stats->stats.rtsSuccessCount = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].rtsSuccessCount, chip_id));
+-    vap_stats->stats.qosTransmittedFrames = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].qosTransmittedFrames, chip_id));
+-    vap_stats->stats.transmittedAmsdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmittedAmsdu, chip_id));
+-    vap_stats->stats.transmittedOctetsInAmsdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmittedOctetsInAmsdu, chip_id));
+-    vap_stats->stats.transmittedAmpdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmittedAmpdu, chip_id));
+-    vap_stats->stats.transmittedMpduInAmpdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmittedMpduInAmpdu, chip_id));
+-    vap_stats->stats.transmittedOctetsInAmpdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmittedOctetsInAmpdu, chip_id));
+-    vap_stats->stats.beamformingFrames = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].beamformingFrames, chip_id));
+-    vap_stats->stats.transmitStreamRprtMSDUFailed = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmitStreamRprtMSDUFailed, chip_id));
+-    vap_stats->stats.rtsFailure = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].rtsFailure, chip_id));
+-    vap_stats->stats.ackFailure = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].ackFailure, chip_id));
+-    vap_stats->stats.failedAmsdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].failedAmsdu, chip_id));
+-    vap_stats->stats.retryAmsdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].retryAmsdu, chip_id));
+-    vap_stats->stats.multipleRetryAmsdu = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].multipleRetryAmsdu, chip_id));
+-    vap_stats->stats.amsduAckFailure = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].amsduAckFailure, chip_id));
+-    vap_stats->stats.implicitBarFailure = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].implicitBarFailure, chip_id));
+-    vap_stats->stats.explicitBarFailure = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].explicitBarFailure, chip_id));
+-    vap_stats->stats.transmitStreamRprtMultipleRetryCount = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmitStreamRprtMultipleRetryCount, chip_id));
+-    vap_stats->stats.transmitBw20 = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmitBw20, chip_id));
+-    vap_stats->stats.transmitBw40 = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmitBw40, chip_id));
+-    vap_stats->stats.transmitBw80 = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmitBw80, chip_id));
+-    vap_stats->stats.rxGroupFrame = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.rxGroupFrame[vap_id], chip_id));
+-    vap_stats->stats.txSenderError = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.txSenderError[vap_id], chip_id));
+-    mtlk_osal_lock_release(&hw_stats->lock);
++  mtlk_osal_lock_acquire(&hw_stats->lock);
++  stats->txInUnicastHd                        = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].txInUnicastHd, chip_id);
++  stats->txInMulticastHd                      = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].txInMulticastHd, chip_id);
++  stats->txInBroadcastHd                      = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].txInBroadcastHd, chip_id);
++  stats->txInUnicastNumOfBytes                = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].txInUnicastNumOfBytes, chip_id);
++  stats->txInMulticastNumOfBytes              = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].txInMulticastNumOfBytes, chip_id);
++  stats->txInBroadcastNumOfBytes              = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].txInBroadcastNumOfBytes, chip_id);
++  stats->rxOutUnicastHd                       = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].rxOutUnicatHd, chip_id);
++  stats->rxOutMulticastHd                     = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].rxOutMulticastHd, chip_id);
++  stats->rxOutBroadcastHd                     = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].rxOutBroadcastHd, chip_id);
++  stats->rxOutUnicastNumOfBytes               = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].rxOutUnicastNumOfBytes, chip_id);
++  stats->rxOutMulticastNumOfBytes             = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].rxOutMulticastNumOfBytes, chip_id);
++  stats->rxOutBroadcastNumOfBytes             = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].rxOutBroadcastNumOfBytes, chip_id);
++  stats->agerCount                            = MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.vapCounts[vap_id].agerCount, chip_id);
++
++  stats->dropMpdu                             = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].dropMpdu, chip_id);
++  stats->mpduUnicastOrMngmnt                  = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].mpduUnicastOrMngmnt, chip_id);
++  stats->mpduRetryCount                       = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].mpduRetryCount, chip_id);
++  stats->amsdu                                = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.vapCounts[vap_id].amsdu, chip_id);
++  stats->mpduTypeNotSupported                 = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].mpduTypeNotSupported, chip_id);
++  stats->replayData                           = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].replayData, chip_id);
++  stats->replayMngmnt                         = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].replayMngmnt, chip_id);
++  if (_chipid_is_gen6_a0(chip_id)) {
++    stats->tkipCount                          = MTLK_GET_STATS_A0(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].tkipCount);
++    stats->securityFailure                    = MTLK_GET_STATS_A0(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].securityFailure);
++  } else /* if(_chipid_is_gen6_b0(chip_id)) */ { /* all others: b0 and d2 */
++    stats->tkipCount                          = MTLK_GET_STATS_B0(hw_stats->stats_copy, rxCounters.vapCounts[vap_id].tkipCount);
++    stats->securityFailure                    = MTLK_GET_STATS_B0(hw_stats->stats_copy, rxCounters.vapCounts[vap_id].securityFailure);
++  }
++  stats->amsduBytes                           = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.vapCounts[vap_id].amsduBytes, chip_id);
++  stats->ampdu                                = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].ampdu, chip_id);
++  stats->mpduInAmpdu                          = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.vapCounts[vap_id].mpduInAmpdu, chip_id);
++  stats->octetsInAmpdu                        = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.vapCounts[vap_id].octetsInAmpdu, chip_id);
++  stats->rxClassifierSecurityMismatch         = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.vapCounts[vap_id].rxCoordinatorSecurityMismatch, chip_id);
++  stats->bcMcCountVap                         = MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].bcMcCountVap, chip_id);
++
++  stats->rtsSuccessCount                      = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].rtsSuccessCount, chip_id);
++  stats->qosTransmittedFrames                 = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].qosTransmittedFrames, chip_id);
++  stats->transmittedAmsdu                     = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmittedAmsdu, chip_id);
++  stats->transmittedOctetsInAmsdu             = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmittedOctetsInAmsdu, chip_id);
++  stats->transmittedAmpdu                     = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmittedAmpdu, chip_id);
++  stats->transmittedMpduInAmpdu               = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmittedMpduInAmpdu, chip_id);
++  stats->transmittedOctetsInAmpdu             = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmittedOctetsInAmpdu, chip_id);
++  stats->beamformingFrames                    = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].beamformingFrames, chip_id);
++  stats->transmitStreamRprtMSDUFailed         = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmitStreamRprtMSDUFailed, chip_id);
++  stats->rtsFailure                           = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].rtsFailure, chip_id);
++  stats->ackFailure                           = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].ackFailure, chip_id);
++  stats->failedAmsdu                          = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].failedAmsdu, chip_id);
++  stats->retryAmsdu                           = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].retryAmsdu, chip_id);
++  stats->multipleRetryAmsdu                   = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].multipleRetryAmsdu, chip_id);
++  stats->amsduAckFailure                      = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].amsduAckFailure, chip_id);
++  stats->implicitBarFailure                   = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].implicitBarFailure, chip_id);
++  stats->explicitBarFailure                   = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].explicitBarFailure, chip_id);
++  stats->transmitStreamRprtMultipleRetryCount = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmitStreamRprtMultipleRetryCount, chip_id);
++  stats->transmitBw20                         = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmitBw20, chip_id);
++  stats->transmitBw40                         = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmitBw40, chip_id);
++  stats->transmitBw80                         = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmitBw80, chip_id);
++  stats->rxGroupFrame                         = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.rxGroupFrame[vap_id], chip_id);
++  stats->txSenderError                        = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.txSenderError[vap_id], chip_id);
++  mtlk_osal_lock_release(&hw_stats->lock);
+ }
+ #endif /* MTLK_LEGACY_STATISTICS */
+ 
+@@ -6350,6 +6419,29 @@ wave_hw_calculate_airtime_efficiency (uint64 bytes, uint32 time)
+   return (uint32)efficiency;
+ }
+ 
++/* This function accumulates 32-bit statistics into a 64-bit value.  */
++/* One limitation of this function is that it cannot detect multiple */
++/* over-runs in the 32-bit counter.                                  */
++/* Upon return, prev_val is updated to new_val.                      */
++static inline void __stats_accumulate_64bit (uint64* sum, uint32* prev_val, uint32 new_val)
++{
++  uint32 delta;
++  delta = new_val - *prev_val;
++  *sum += delta;
++  *prev_val = new_val;
++}
++
++/* This function returns the difference between current and previous */
++/* values of a 32-bit statistic. Difference is modulo or absolute.   */
++/* One limitation of this function is that it cannot detect multiple */
++/* over-runs in the 32-bit counter.                                  */
++/* Upon return, prev_val is updated to new_val.                      */
++static inline void __stats_difference (uint64* diff, uint32* prev_val, uint32 new_val)
++{
++  *diff     = new_val - *prev_val;
++  *prev_val = new_val;
++}
++
+ #ifndef MTLK_LEGACY_STATISTICS
+ void update_overrun_of_stats (uint64* sum, uint32* prev_val, unsigned long* new_val)
+ {
+@@ -6402,7 +6494,7 @@ _mtlk_sta_update_statistics (mtlk_hw_t *hw, sta_entry *sta, stationPhyRxStatusDb
+   new_rx_time = sta_status->perClientRxtimeUsage;
+ 
+   mtlk_osal_lock_acquire(&hw_stats->lock);
+-  new_tx_time = *(uint32*)(MTLK_STATS_COPY_OFFSET(linkAdaptationStats.totalTxTime[sta_sid], chip_id));
++  new_tx_time = MTLK_GET_STATS(hw_stats->stats_copy, linkAdaptationStats.totalTxTime[sta_sid], chip_id);
+ #endif
+ 
+   /* RX time and TX time are coming from different entities and requests,
+@@ -6431,61 +6523,54 @@ _mtlk_sta_update_statistics (mtlk_hw_t *hw, sta_entry *sta, stationPhyRxStatusDb
+ #else /* MTLK_LEGACY_STATISTICS */
+   rx_bytes = values->rxOutStaNumOfBytes;
+   tx_bytes = values->mpduByteTransmitted;
+-  tx_errors = *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].rtsFailure, chip_id)) +
+-              *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmitStreamRprtMSDUFailed, chip_id)) +
+-              *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].ackFailure, chip_id)) +
+-              *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].failedAmsdu, chip_id)) +
+-              *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.txSenderError[vap_id], chip_id)) +
+-              *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.fwPairWiseMicFailurePackets[vap_id], chip_id)) +
+-              *(uint32*)(MTLK_STATS_COPY_OFFSET(baaCounters.fwMulticastReplayedPackets[vap_id], chip_id));
+-
+-  update_overrun_of_stats(&stats64->mpduFirstRetransmission, &values->mpduFirstRetransmission,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(baaCounters.staCounts[sta_sid].mpduFirstRetransmission, chip_id)));
+-
+-  update_overrun_of_stats(&stats64->mpduTransmitted, &values->mpduTransmitted,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(baaCounters.staCounts[sta_sid].mpduTransmitted, chip_id)));
+-
+-  update_overrun_of_stats(&stats64->mpduByteTransmitted, &values->mpduByteTransmitted,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(baaCounters.staCounts[sta_sid].mpduByteTransmitted, chip_id)));
+-
+-  update_overrun_of_stats(&stats64->rdCount, &values->rdCount,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(rxCounters.rdCount[sta_sid], chip_id)));
+-
+-  update_overrun_of_stats(&stats64->rxOutStaNumOfBytes, &values->rxOutStaNumOfBytes,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(hostIfCounters.staCounts[sta_sid].rxOutStaNumOfBytes, chip_id)));
+-
+-  update_overrun_of_stats(&stats64->swUpdateDrop, &values->swUpdateDrop,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(rxCounters.staCounts[sta_sid].swUpdateDrop, chip_id)));
+-
+-  update_overrun_of_stats(&stats64->mpduRetransmission, &values->mpduRetransmission,
+-      (unsigned long *)( hw_stats->stats_data + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, baaCounters.staCounts[sta_sid].mpduRetransmission)));
+-
+-  update_overrun_of_stats(&stats64->exhaustedCount, &values->exhaustedCount,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(perClientStats.exhaustedCount[sta_sid], chip_id)));
+-
+-  update_overrun_of_stats(&stats64->successCount, &values->successCount,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(perClientStats.successCount[sta_sid], chip_id)));
+-
+-  update_overrun_of_stats(&stats64->rdDuplicateDrop, &values->rdDuplicateDrop,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(rxCounters.staCounts[sta_sid].rdDuplicateDrop, chip_id)));
+-
+-  update_overrun_of_stats(&stats64->missingSn, &values->missingSn,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(rxCounters.staCounts[sta_sid].missingSn, chip_id)));
+-
+-  update_overrun_of_stats(&stats64->mpduInAmpdu, &values->mpduInAmpdu,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(rxCounters.vapCounts[vap_id].mpduInAmpdu, chip_id)));
+-
+-  update_overrun_of_stats(&stats64->ampdu, &values->ampdu,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(rxCounters.rxppVapCounts[vap_id].ampdu, chip_id)));
+-
+-  update_overrun_of_stats(&stats64->mpduRetryCount, &values->mpduRetryCount,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(rxCounters.rxppVapCounts[vap_id].mpduRetryCount, chip_id)));
+-
+-
+-  update_overrun_of_stats(&stats64->transmittedAmpdu, &values->transmittedAmpdu,
+-                                   (unsigned long*)(MTLK_STATS_COPY_OFFSET(baaCounters.vapCounts[vap_id].transmittedAmpdu, chip_id)));
+-
+-  update_overrun_of_stats(&stats64->tx_errors, &values->tx_errors, &tx_errors);
++  tx_errors = MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].rtsFailure, chip_id) +
++              MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].transmitStreamRprtMSDUFailed, chip_id) +
++              MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].ackFailure, chip_id) +
++              MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.vapCounts[vap_id].failedAmsdu, chip_id) +
++              MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.txSenderError[vap_id], chip_id) +
++              MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.fwPairWiseMicFailurePackets[vap_id], chip_id) +
++              MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.fwMulticastReplayedPackets[vap_id], chip_id);
++
++  /*
++  values->ewmaTimeNsec  = MTLK_GET_STATS(hw_stats->stats_copy, linkAdaptationStats.ewmaTimeNsec[sta_sid], chip_id);
++  __stats_difference(&stats64->sumTimeNsec, &values->prevSumTimeNsec,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, linkAdaptationStats.sumTimeNsec[sta_sid], chip_id)));
++  __stats_accumulate_64bit(&stats64->numMsdus, &values->numMsdus,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, linkAdaptationStats.numMsdus[sta_sid], chip_id)));
++  */
++  __stats_accumulate_64bit(&stats64->mpduFirstRetransmission, &values->mpduFirstRetransmission,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.staCounts[sta_sid].mpduFirstRetransmission, chip_id)));
++  __stats_accumulate_64bit(&stats64->mpduTransmitted, &values->mpduTransmitted,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.staCounts[sta_sid].mpduTransmitted, chip_id)));
++  __stats_accumulate_64bit(&stats64->mpduByteTransmitted, &values->mpduByteTransmitted,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, baaCounters.staCounts[sta_sid].mpduByteTransmitted, chip_id)));
++  __stats_accumulate_64bit(&stats64->rdCount, &values->rdCount,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rdCount[sta_sid], chip_id)));
++  __stats_accumulate_64bit(&stats64->rxOutStaNumOfBytes, &values->rxOutStaNumOfBytes,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, hostIfCounters.staCounts[sta_sid].rxOutStaNumOfBytes, chip_id)));
++  __stats_accumulate_64bit(&stats64->swUpdateDrop, &values->swUpdateDrop,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.staCounts[sta_sid].swUpdateDrop, chip_id)));
++  if(_chipid_is_gen6_b0(chip_id)){
++    __stats_accumulate_64bit(&stats64->mpduRetransmission, &values->mpduRetransmission,
++       (MTLK_GET_STATS_B0(hw_stats->stats_copy, baaCounters.staCounts[sta_sid].mpduRetransmission)));
++  }
++  __stats_accumulate_64bit(&stats64->exhaustedCount, &values->exhaustedCount,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, perClientStats.exhaustedCount[sta_sid], chip_id)));
++  __stats_accumulate_64bit(&stats64->successCount, &values->successCount,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, perClientStats.successCount[sta_sid], chip_id)));
++  __stats_accumulate_64bit(&stats64->rdDuplicateDrop, &values->rdDuplicateDrop,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.staCounts[sta_sid].rdDuplicateDrop, chip_id)));
++  __stats_accumulate_64bit(&stats64->missingSn, &values->missingSn,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.staCounts[sta_sid].missingSn, chip_id)));
++  __stats_accumulate_64bit(&stats64->mpduInAmpdu, &values->mpduInAmpdu,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.vapCounts[vap_id].mpduInAmpdu, chip_id)));
++  __stats_accumulate_64bit(&stats64->ampdu, &values->ampdu,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].ampdu, chip_id)));
++  __stats_accumulate_64bit(&stats64->mpduRetryCount, &values->mpduRetryCount,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, rxCounters.rxppVapCounts[vap_id].mpduRetryCount, chip_id)));
++  __stats_accumulate_64bit(&stats64->transmittedAmpdu, &values->transmittedAmpdu,
++                                   (MTLK_GET_STATS(hw_stats->stats_copy, linkAdaptationStats.transmittedAmpdu[sta_sid], chip_id)));
++  __stats_accumulate_64bit(&stats64->tx_errors, &values->tx_errors, tx_errors);
+ 
+   mtlk_osal_lock_release(&hw_stats->lock);
+ 
+@@ -6535,54 +6620,30 @@ BOOL mtlk_hw_get_stats_available (mtlk_hw_t *hw)
+   return hw_stats->available;
+ }
+ 
+-static inline void CONVERT_ENDIANESS_UINT16 (uint16* parameter,int iterations)
+-{
+-    int i;
+-    for (i = 0; i < iterations; i++) {
+-        parameter[i] = MAC_TO_HOST16(parameter[i]);
+-        ILOG3_DD("Parameter - %d index - %d\n", parameter[i], i);
++static inline void __mtlk_convert_endianess_array_uint16(uint16 *array, size_t size) {
++    size_t i;
++    size /= sizeof(uint16);
++    for (i = 0; i < size; i++) {
++        array[i] = MAC_TO_HOST16(array[i]);
++        ILOG3_DD("Parameter - %d index - %d\n", array[i], i);
+     }
+ }
+ 
+-static inline void CONVERT_ENDIANESS_2D_UINT32 (uint32 *parameter,int rows,int column)
+-{
+-    int i, j;
+-    for (i = 0; i < rows; i++) {
+-        for (j = 0; j < column; j++) {
+-            *(parameter + (i * column) + (j)) = MAC_TO_HOST32(*(parameter + (i * column) + (j)));
+-            ILOG3_DDD("Parameter - %d index1 - %d index2 - %d\n", *(parameter + (i * column) + (j)), i, j);
+-        }
+-    }
+-}
+-
+-static inline void CONVERT_ENDIANESS_UINT32 (uint32 *parameter,int iterations)
+-{
+-    int i;
+-    for (i = 0; i < iterations; i++) {
+-        parameter[i] = MAC_TO_HOST32(parameter[i]);
+-        ILOG3_DD("Parameter - %d index - %d\n", parameter[i], i);
++static inline void __mtlk_convert_endianess_array_uint32(uint32 *array, size_t size) {
++    size_t i;
++    size /= sizeof(uint32);
++    for (i = 0; i < size; i++) {
++        array[i] = MAC_TO_HOST32(array[i]);
++        ILOG3_DD("Parameter - %d index - %d\n", array[i], i);
+     }
+ }
+ 
+-static inline void CONVERT_ENDIANESS_3D_UINT32 (uint32* parameter,int rows,int column, int iter)
+-{
+-    int i, j, k;
+-    for (i = 0; i < rows; i++) {
+-        for (j = 0; j < column; j++) {
+-          for (k = 0; k < iter; k++) {
+-            *(parameter + (i * column * iter) + (j * iter) + k) = MAC_TO_HOST32(*(parameter + (i * column * iter) + (j * column) + k));
+-            ILOG3_DDDD("Parameter - %d index1 - %d, index2 - %d, index3 - %d\n", *(parameter + (i * column * iter) + (j * iter) + k), i, j, k);
+-          }
+-        }
+-    }
+-}
+-
+-static inline void CONVERT_ENDIANESS_UINT64 (uint64* parameter,int iterations)
+-{
+-    int i;
+-    for (i = 0; i < iterations; i++) {
+-        parameter[i] = MAC_TO_HOST64(parameter[i]);
+-        ILOG3_DD("Parameter - %d index - %d\n", parameter[i], i);
++static inline void __mtlk_convert_endianess_array_uint64(uint64 *array, size_t size) {
++    size_t i;
++    size /= sizeof(uint64);
++    for (i = 0; i < size; i++) {
++        array[i] = MAC_TO_HOST64(array[i]);
++        ILOG3_DD("Parameter - %d index - %d\n", array[i], i);
+     }
+ }
+ 
+@@ -6592,368 +6653,266 @@ _mtlk_hw_check_and_convert_endianess (mtlk_hw_t *hw)
+   hw_statistics_t         *hw_stats;
+   int                      i;
+   int                      chip_id = __hw_mmb_get_chip_id(hw);
+-  uint32                  *value;
+ 
+   hw_stats = &hw->hw_stats;
+-  CONVERT_ENDIANESS_2D_UINT32( MTLK_STATS_DATA_OFFSET(hostIfCounters.qosByteCountSta[0][0], chip_id), HW_NUM_OF_STATIONS, NUM_OF_TIDS);
+-  CONVERT_ENDIANESS_2D_UINT32( MTLK_STATS_DATA_OFFSET(hostIfCounters.qosTxSta[0][0], chip_id) , HW_NUM_OF_STATIONS, NUM_OF_TIDS);
+-  CONVERT_ENDIANESS_2D_UINT32( MTLK_STATS_DATA_OFFSET(hostIfCounters.qosTxVap[0][0], chip_id), HW_NUM_OF_VAPS, ACCESS_CATEGORY_NUM);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, hostIfCounters.qosByteCountSta, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, hostIfCounters.qosTxSta, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, hostIfCounters.qosTxVap, chip_id);
+   for (i = 0; i < HW_NUM_OF_VAPS; i++) {
+-
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].txInUnicastHd , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].txInMulticastHd , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].txInBroadcastHd , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].txInUnicastNumOfBytes , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].txInMulticastNumOfBytes , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].txInBroadcastNumOfBytes , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].rxOutUnicatHd , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].rxOutMulticastHd , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].rxOutBroadcastHd , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].rxOutUnicastNumOfBytes , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].rxOutMulticastNumOfBytes , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].rxOutMulticastNumOfBytes , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.vapCounts[i].agerCount , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.vapCounts[i].amsdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.vapCounts[i].amsduBytes , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.vapCounts[i].dropCount , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.vapCounts[i].mpduInAmpdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.vapCounts[i].octetsInAmpdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.vapCounts[i].rxCoordinatorSecurityMismatch , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].txInUnicastHd , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].txInMulticastHd , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].txInBroadcastHd , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].txInUnicastNumOfBytes , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].txInMulticastNumOfBytes , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].txInBroadcastNumOfBytes , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].rxOutUnicatHd , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].rxOutMulticastHd , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].rxOutBroadcastHd , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].rxOutUnicastNumOfBytes , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].rxOutMulticastNumOfBytes , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].rxOutMulticastNumOfBytes , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.vapCounts[i].agerCount , chip_id);
++
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.vapCounts[i].amsdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.vapCounts[i].amsduBytes , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.vapCounts[i].mpduInAmpdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.vapCounts[i].octetsInAmpdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.vapCounts[i].rxCoordinatorSecurityMismatch , chip_id);
+ 
+     if (_chipid_is_gen6_a0(chip_id)) {
+-      value = ( hw_stats->stats_data + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600, rxCounters.rxppVapCounts[i].tkipCount));
+-      *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-      value = ( hw_stats->stats_data + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600, rxCounters.rxppVapCounts[i].securityFailure));
+-      *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
++      MTLK_CONVERT_ENDIANESS_A0(hw_stats->stats_data, rxCounters.rxppVapCounts[i].tkipCount);
++      MTLK_CONVERT_ENDIANESS_A0(hw_stats->stats_data, rxCounters.rxppVapCounts[i].securityFailure);
+     } else /* if (_chipid_is_gen6_b0(chip_id)) */ {
+-      value = ( hw_stats->stats_data + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, rxCounters.vapCounts[i].tkipCount));
+-      *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-      value = ( hw_stats->stats_data + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, rxCounters.vapCounts[i].securityFailure));
+-      *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    }
+-
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.rxppVapCounts[i].mpduUnicastOrMngmnt , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.rxppVapCounts[i].mpduRetryCount , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.rxppVapCounts[i].dropMpdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.rxppVapCounts[i].ampdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.rxppVapCounts[i].mpduTypeNotSupported , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.rxppVapCounts[i].replayData , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.rxppVapCounts[i].replayMngmnt , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.rxppVapCounts[i].bcMcCountVap , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].rtsSuccessCount , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].rtsFailure , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmitStreamRprtMSDUFailed , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].qosTransmittedFrames , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmittedAmsdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmittedOctetsInAmsdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmittedAmpdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmittedMpduInAmpdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmittedOctetsInAmpdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].beamformingFrames , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].ackFailure , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].failedAmsdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].retryAmsdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].multipleRetryAmsdu , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].amsduAckFailure , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].implicitBarFailure , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].explicitBarFailure , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmitStreamRprtMultipleRetryCount , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmitBw20 , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmitBw40 , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmitBw80 , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.vapCounts[i].transmitBw160 , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
++      MTLK_CONVERT_ENDIANESS_B0(hw_stats->stats_data, rxCounters.vapCounts[i].tkipCount);
++      MTLK_CONVERT_ENDIANESS_B0(hw_stats->stats_data, rxCounters.vapCounts[i].securityFailure);
++    }
++
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.rxppVapCounts[i].mpduUnicastOrMngmnt , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.rxppVapCounts[i].mpduRetryCount , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.rxppVapCounts[i].dropMpdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.rxppVapCounts[i].ampdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.rxppVapCounts[i].mpduTypeNotSupported , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.rxppVapCounts[i].replayData , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.rxppVapCounts[i].replayMngmnt , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.rxppVapCounts[i].bcMcCountVap , chip_id);
++
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].rtsSuccessCount , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].rtsFailure , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmitStreamRprtMSDUFailed , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].qosTransmittedFrames , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmittedAmsdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmittedOctetsInAmsdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmittedAmpdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmittedMpduInAmpdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmittedOctetsInAmpdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].beamformingFrames , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].ackFailure , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].failedAmsdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].retryAmsdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].multipleRetryAmsdu , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].amsduAckFailure , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].implicitBarFailure , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].explicitBarFailure , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmitStreamRprtMultipleRetryCount , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmitBw20 , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmitBw40 , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmitBw80 , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.vapCounts[i].transmitBw160 , chip_id);
+   }
+ 
+   for (i = 0; i < HW_NUM_OF_STATIONS; i++) {
+-    value = MTLK_STATS_DATA_OFFSET(hostIfCounters.staCounts[i].rxOutStaNumOfBytes , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.staCounts[i].rddelayed , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.staCounts[i].swUpdateDrop , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.staCounts[i].rdDuplicateDrop , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.staCounts[i].missingSn , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.staCounts[i].mpduFirstRetransmission , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.staCounts[i].mpduTransmitted , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.staCounts[i].mpduByteTransmitted , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-
+-    if (!_chipid_is_gen6_a0(chip_id)) { /* b0 etc */
+-      value = ( hw_stats->stats_data + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, hostIfCounters.staCounts[i].agerPdNoTransmitCountSta));
+-      *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-      value = ( hw_stats->stats_data + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, baaCounters.staCounts[i].mpduRetransmission));
+-      *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-      value = ( hw_stats->stats_data + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, baaCounters.staCounts[i].channelTransmitTime));
+-      *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, hostIfCounters.staCounts[i].rxOutStaNumOfBytes , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.staCounts[i].rddelayed , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.staCounts[i].swUpdateDrop , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.staCounts[i].rdDuplicateDrop , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.staCounts[i].missingSn , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.staCounts[i].mpduFirstRetransmission , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.staCounts[i].mpduTransmitted , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.staCounts[i].mpduByteTransmitted , chip_id);
++
++    if (_chipid_is_gen6_b0(chip_id)) { /* b0 etc */
++      MTLK_CONVERT_ENDIANESS_B0(hw_stats->stats_data, hostIfCounters.staCounts[i].agerPdNoTransmitCountSta);
++      MTLK_CONVERT_ENDIANESS_B0(hw_stats->stats_data, baaCounters.staCounts[i].mpduRetransmission);
++      MTLK_CONVERT_ENDIANESS_B0(hw_stats->stats_data, baaCounters.staCounts[i].channelTransmitTime);
+     }
+   }
+ 
+   for (i = 0; i < GEN6_NUM_OF_BANDS; i++) {
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.bandCounts[i].barMpduCount , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.bandCounts[i].crcErrorCount , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(rxCounters.bandCounts[i].delCrcError , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.retryCounts[i].retryCount , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET(baaCounters.retryCounts[i].multipleRetryCount , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-
+-  }
+-
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(rxCounters.rdCount, chip_id), HW_NUM_OF_STATIONS);
+-  CONVERT_ENDIANESS_UINT16(MTLK_STATS_DATA_OFFSET(rxCounters.qosRxSta, chip_id), HW_NUM_OF_STATIONS);
+-
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.fwMngmntframesSent, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.fwMngmntFramesConfirmed, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.fwMngmntframesRecieved, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.fwctrlFramesSent, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.fwctrlFramesRecieved, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.fwMulticastReplayedPackets, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.fwPairWiseMicFailurePackets, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.groupMicFailurePackets, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.beaconProbeResponsePhyType, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.rxBasicReport, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.txFrameErrorCount, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.rxGroupFrame, chip_id), HW_NUM_OF_VAPS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(baaCounters.txSenderError, chip_id), HW_NUM_OF_VAPS);
+-
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaRequestWasSent, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaRequestConfiremd, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaResponseReceivedWithStatusSuccessAndValid, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaResponseReceivedWithStatusSuccessAndInvalid, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaResponseReceivedWithStatusFailure, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaResponseTimeout, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventBaAgreementOpened, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventBarWasSent, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventBarWasDiscarded, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventBarWasAnsweredWithAck, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventBarWasAnsweredWithBa, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventInactivityTimeout, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventDelbaWasSent, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventDelbaReceived, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventCloseTid, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventOpenTid, chip_id), GEN6_NUM_OF_BANDS);
+-
+-  CONVERT_ENDIANESS_UINT16(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorStationGlobalStats.InitiatorStationStatisticsEventRemove, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT16(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorStationGlobalStats.InitiatorStationStatisticsEventAdd, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT16(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorStationGlobalStats.InitiatorStationStatisticsEventAddbaResponseReceivedWithIllegalTid, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT16(MTLK_STATS_DATA_OFFSET(tsManagerInitiatorStationGlobalStats.Reserve, chip_id), GEN6_NUM_OF_BANDS);
+-
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventAddbaRequestAccepted, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventAddbaRequestWasReceivedWithInvalidParameters, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventAddbaResponseWasSentWithStatusSuccess, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventAddbaResponseWasSentWithStatusFailure, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventBaAgreementOpened, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventBaAgreementClosed, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventBarWasReceivedWithBaAgreementOpened, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventInactivityTimeout, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventDelbaReceived, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventDelbaWasSent, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventIllegalAggregationWasReceived, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventCloseTid, chip_id), GEN6_NUM_OF_BANDS);
+-
+-  CONVERT_ENDIANESS_UINT16(MTLK_STATS_DATA_OFFSET(tsManagerRecipientStationGlobalStats.RecipientStationStatisticsEventRemove, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT16(MTLK_STATS_DATA_OFFSET(tsManagerRecipientStationGlobalStats.RecipientStationStatisticsEventAdd, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT16(MTLK_STATS_DATA_OFFSET(tsManagerRecipientStationGlobalStats.RecipientStationStatisticsEventAddbaRequestReceivedWithIllegalTid, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT16(MTLK_STATS_DATA_OFFSET(tsManagerRecipientStationGlobalStats.Reserve, chip_id), GEN6_NUM_OF_BANDS);
+-
+-  CONVERT_ENDIANESS_2D_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationStats.ratesMask[0][0], chip_id), HW_NUM_OF_STATIONS, RATES_BIT_MASK_SIZE);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationStats.bfReportReceivedCounter, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationStats.protectionSentCounter, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationStats.protectionSucceededCounter, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationStats.totalTxTime, chip_id), HW_NUM_OF_STATIONS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationStats.rxDc, chip_id), MAX(NUM_OF_BW, PHY_STATISTICS_MAX_RX_ANT));
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationStats.txLo, chip_id), MAX(NUM_OF_BW, PHY_STATISTICS_MAX_RX_ANT));
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationStats.rxIq, chip_id), MAX(NUM_OF_BW, PHY_STATISTICS_MAX_RX_ANT));
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationStats.txIq, chip_id), MAX(NUM_OF_BW, PHY_STATISTICS_MAX_RX_ANT));
+-
+-  value = MTLK_STATS_DATA_OFFSET(multicastStats.notEnoughClonePds , chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( multicastStats.allClonesFinishedTransmission, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( multicastStats.noStationsInGroup, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-
+-  value = MTLK_STATS_DATA_OFFSET( trainingManagerStats.trainingTimerExpiredCounter, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( trainingManagerStats.trainingStartedCounter, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( trainingManagerStats.trainingFinishedSuccessfullyCounter, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( trainingManagerStats.trainingFinishedUnsuccessfullyCounter, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( trainingManagerStats.trainingNotStartedCounter, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-
+-  CONVERT_ENDIANESS_2D_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.ratesMask[0][0], chip_id), TX_MU_GROUPS, MAX_USP_IN_VHT_GROUP);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.protectionSentCounter, chip_id), TX_MU_GROUPS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.protectionSucceededCounter, chip_id), TX_MU_GROUPS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.DataPhyMode, chip_id), TX_MU_GROUPS);
+-  CONVERT_ENDIANESS_2D_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.powerData[0][0], chip_id), TX_MU_GROUPS, NUM_OF_BW);
+-  CONVERT_ENDIANESS_2D_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.scpData[0][0], chip_id), TX_MU_GROUPS, NUM_OF_BW);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.dataBwLimit, chip_id), TX_MU_GROUPS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.groupGoodput, chip_id), TX_MU_GROUPS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.raState, chip_id), TX_MU_GROUPS);
+-  CONVERT_ENDIANESS_2D_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.raStability[0][0], chip_id), TX_MU_GROUPS, MAX_USP_IN_VHT_GROUP);
+-  CONVERT_ENDIANESS_2D_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.nssData[0][0], chip_id), TX_MU_GROUPS, MAX_USP_IN_VHT_GROUP);
+-  CONVERT_ENDIANESS_2D_UINT32(MTLK_STATS_DATA_OFFSET(linkAdaptationMuStats.mcsData[0][0], chip_id), TX_MU_GROUPS, MAX_USP_IN_VHT_GROUP);
+-
+-  CONVERT_ENDIANESS_3D_UINT32(MTLK_STATS_DATA_OFFSET(ptaStats.illegalEvent[0][0][0], chip_id), PTA_EVENT_NUM_OF_EVENTS, PTA_STATE_NUM_OF_STATES, PTA_RADIO_NUM_OF_TYPES);
+-  CONVERT_ENDIANESS_3D_UINT32(MTLK_STATS_DATA_OFFSET(ptaStats.ignoreEvent[0][0][0], chip_id), PTA_EVENT_NUM_OF_EVENTS, PTA_STATE_NUM_OF_STATES, PTA_RADIO_NUM_OF_TYPES);
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.zigbeeStarvationTimerExpired, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.btStarvationTimerExpired, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.zigbeeDenyOverTime, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.btDenyOverTime, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.gpio0TxDemandLow, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.zigbeeGrnatNotUsed, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.btGrnatNotUsed, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.zigbeeGrnatUsed, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.btGrnatUsed, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.zigbeeTxOngoing, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.btTxOngoing, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-  value = MTLK_STATS_DATA_OFFSET( ptaStats.gpio, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(twtStats.numOfAgreementsForSta, chip_id), HW_NUM_OF_STATIONS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(twtStats.numOfStaInSp, chip_id), MAX_NUM_OF_SP);
+-
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(perClientStats.successCount, chip_id), HW_NUM_OF_STATIONS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(perClientStats.exhaustedCount, chip_id), HW_NUM_OF_STATIONS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(perClientStats.clonedCount, chip_id), HW_NUM_OF_STATIONS);
+-
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.calibrationMask, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.onlineCalibrationMask, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.dropReasonClassifier, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.dropReasonDisconnect, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.dropReasonATF, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.dropReasonTSFlush, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.dropReasonReKey, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.dropReasonSetKey, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.dropReasonDiscard, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.dropReasonDsabled, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.dropReasonAggError, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.defragStart, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.defragEnd, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.defragTimeout, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.classViolationErrors, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.rxhErrors, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.rxSmps, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.rxOmn, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.txMngFromHost, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.txDataFromHost, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.cyclicBufferOverflow, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.beaconsTransmitted, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(generalStats.debugStatistics, chip_id), GEN6_NUM_OF_BANDS);
+-
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(dynamicBwStats.dynamicBW20MHz, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(dynamicBwStats.dynamicBW40MHz, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(dynamicBwStats.dynamicBW80MHz, chip_id), GEN6_NUM_OF_BANDS);
+-  CONVERT_ENDIANESS_UINT32(MTLK_STATS_DATA_OFFSET(dynamicBwStats.dynamicBW160MHz, chip_id), GEN6_NUM_OF_BANDS);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.bandCounts[i].barMpduCount , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.bandCounts[i].crcErrorCount , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, rxCounters.bandCounts[i].delCrcError , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.retryCounts[i].retryCount , chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, baaCounters.retryCounts[i].multipleRetryCount , chip_id);
++  }
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, rxCounters.rdCount, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_16(hw_stats->stats_data, rxCounters.qosRxSta, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.fwMngmntframesSent, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.fwMngmntFramesConfirmed, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.fwMngmntframesRecieved, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.fwctrlFramesSent, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.fwctrlFramesRecieved, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.fwMulticastReplayedPackets, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.fwPairWiseMicFailurePackets, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.groupMicFailurePackets, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.beaconProbeResponsePhyType, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.rxBasicReport, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.txFrameErrorCount, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.rxGroupFrame, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, baaCounters.txSenderError, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaRequestWasSent, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaRequestConfiremd, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaResponseReceivedWithStatusSuccessAndValid, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaResponseReceivedWithStatusSuccessAndInvalid, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaResponseReceivedWithStatusFailure, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventAddbaResponseTimeout, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventBaAgreementOpened, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventBarWasSent, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventBarWasDiscarded, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventBarWasAnsweredWithAck, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventBarWasAnsweredWithBa, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventInactivityTimeout, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventDelbaWasSent, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventDelbaReceived, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventCloseTid, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerInitiatorTidGlobalStats.InitiatorTidStatisticsEventOpenTid, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_16(hw_stats->stats_data, tsManagerInitiatorStationGlobalStats.InitiatorStationStatisticsEventRemove, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_16(hw_stats->stats_data, tsManagerInitiatorStationGlobalStats.InitiatorStationStatisticsEventAdd, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_16(hw_stats->stats_data, tsManagerInitiatorStationGlobalStats.InitiatorStationStatisticsEventAddbaResponseReceivedWithIllegalTid, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_16(hw_stats->stats_data, tsManagerInitiatorStationGlobalStats.Reserve, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventAddbaRequestAccepted, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventAddbaRequestWasReceivedWithInvalidParameters, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventAddbaResponseWasSentWithStatusSuccess, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventAddbaResponseWasSentWithStatusFailure, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventBaAgreementOpened, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventBaAgreementClosed, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventBarWasReceivedWithBaAgreementOpened, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventInactivityTimeout, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventDelbaReceived, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventDelbaWasSent, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventIllegalAggregationWasReceived, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, tsManagerRecipientTidGlobalStats.RecipientTidStatisticsEventCloseTid, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_16(hw_stats->stats_data, tsManagerRecipientStationGlobalStats.RecipientStationStatisticsEventRemove, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_16(hw_stats->stats_data, tsManagerRecipientStationGlobalStats.RecipientStationStatisticsEventAdd, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_16(hw_stats->stats_data, tsManagerRecipientStationGlobalStats.RecipientStationStatisticsEventAddbaRequestReceivedWithIllegalTid, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_16(hw_stats->stats_data, tsManagerRecipientStationGlobalStats.Reserve, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.ratesMask, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.bfReportReceivedCounter, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.protectionSentCounter, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.protectionSucceededCounter, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.totalTxTime, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.ewmaTimeNsec, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.sumTimeNsec, chip_id);
++  /*
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.numMsdus, chip_id);
++  */
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.transmittedAmpdu, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.rxDc, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.txLo, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.rxIq, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationStats.txIq, chip_id);
++
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data, multicastStats.notEnoughClonePds , chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  multicastStats.allClonesFinishedTransmission, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  multicastStats.noStationsInGroup, chip_id);
++
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  trainingManagerStats.trainingTimerExpiredCounter, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  trainingManagerStats.trainingStartedCounter, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  trainingManagerStats.trainingFinishedSuccessfullyCounter, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  trainingManagerStats.trainingFinishedUnsuccessfullyCounter, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  trainingManagerStats.trainingNotStartedCounter, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.ratesMask, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.protectionSentCounter, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.protectionSucceededCounter, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.DataPhyMode, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.powerData, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.scpData, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.dataBwLimit, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.groupGoodput, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.raState, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.raStability, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.nssData, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, linkAdaptationMuStats.mcsData, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, ptaStats.illegalEvent, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, ptaStats.ignoreEvent, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.zigbeeStarvationTimerExpired, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.btStarvationTimerExpired, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.zigbeeDenyOverTime, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.btDenyOverTime, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.gpio0TxDemandLow, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.zigbeeGrnatNotUsed, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.btGrnatNotUsed, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.zigbeeGrnatUsed, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.btGrnatUsed, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.zigbeeTxOngoing, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.btTxOngoing, chip_id);
++  MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  ptaStats.gpio, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, twtStats.numOfAgreementsForSta, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, twtStats.numOfStaInSp, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, perClientStats.successCount, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, perClientStats.exhaustedCount, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, perClientStats.clonedCount, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.calibrationMask, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.onlineCalibrationMask, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.dropReasonClassifier, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.dropReasonDisconnect, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.dropReasonATF, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.dropReasonTSFlush, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.dropReasonReKey, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.dropReasonSetKey, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.dropReasonDiscard, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.dropReasonDsabled, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.dropReasonAggError, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.defragStart, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.defragEnd, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.defragTimeout, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.classViolationErrors, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.rxhErrors, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.rxSmps, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.rxOmn, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.txMngFromHost, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.txDataFromHost, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.cyclicBufferOverflow, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.beaconsTransmitted, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, generalStats.debugStatistics, chip_id);
++
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, dynamicBwStats.dynamicBW20MHz, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, dynamicBwStats.dynamicBW40MHz, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, dynamicBwStats.dynamicBW80MHz, chip_id);
++  MTLK_CONVERT_ENDIANESS_ARRAY_32(hw_stats->stats_data, dynamicBwStats.dynamicBW160MHz, chip_id);
+ 
+   for (i = 0; i < GEN6_NUM_OF_BANDS; i++) {
+-    value = MTLK_STATS_DATA_OFFSET( phyStatistics.devicePhyRxStatus[i].irad, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( phyStatistics.devicePhyRxStatus[i].tsf, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( phyStatistics.devicePhyRxStatus[i].extStaRx, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( phyStatistics.devicePhyRxStatus[i].txPower, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  phyStatistics.devicePhyRxStatus[i].irad, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  phyStatistics.devicePhyRxStatus[i].tsf, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  phyStatistics.devicePhyRxStatus[i].extStaRx, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  phyStatistics.devicePhyRxStatus[i].txPower, chip_id);
+   }
+ 
+   for (i = 0; i < HW_NUM_OF_STATIONS; i++) {
+-    value = MTLK_STATS_DATA_OFFSET( phyStatistics.staPhyRxStatus[i].phyRate, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( phyStatistics.staPhyRxStatus[i].irad, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( phyStatistics.staPhyRxStatus[i].lastTsf, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( phyStatistics.staPhyRxStatus[i].perClientRxtimeUsage, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  phyStatistics.staPhyRxStatus[i].phyRate, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  phyStatistics.staPhyRxStatus[i].irad, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  phyStatistics.staPhyRxStatus[i].lastTsf, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  phyStatistics.staPhyRxStatus[i].perClientRxtimeUsage, chip_id);
+   }
+ 
+   for (i = 0; i < GEN6_NUM_OF_BANDS; i++) {
+-    value = MTLK_STATS_DATA_OFFSET( currentChannelStats.channelUtilizationStats[i].chUtilizationTotal, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( currentChannelStats.channelUtilizationStats[i].chUtilizationBusy, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( currentChannelStats.channelUtilizationStats[i].chUtilizationBusyTx, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( currentChannelStats.channelUtilizationStats[i].chUtilizationBusyRx, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( currentChannelStats.channelUtilizationStats[i].chUtilizationBusySelf, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
+-    value = MTLK_STATS_DATA_OFFSET( currentChannelStats.channelUtilizationStats[i].chUtilizationBusyExt, chip_id);
+-    *(uint32 *)(value) = MAC_TO_HOST32(*(uint32 *)(value));
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  currentChannelStats.channelUtilizationStats[i].chUtilizationTotal, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  currentChannelStats.channelUtilizationStats[i].chUtilizationBusy, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  currentChannelStats.channelUtilizationStats[i].chUtilizationBusyTx, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  currentChannelStats.channelUtilizationStats[i].chUtilizationBusyRx, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  currentChannelStats.channelUtilizationStats[i].chUtilizationBusySelf, chip_id);
++    MTLK_CONVERT_ENDIANESS(hw_stats->stats_data,  currentChannelStats.channelUtilizationStats[i].chUtilizationBusyExt, chip_id);
+   }
+ }
+ 
+@@ -6963,6 +6922,7 @@ _mtlk_hw_parse_statistics (mtlk_hw_t *hw)
+   int                  res = MTLK_ERR_OK, size = 0, phy_stats_size = 0;
+   hw_statistics_t     *hw_stats;
+   hw_phy_rx_status_t  *phy_rx_status;
++  void                *phy_stats;
+   int                  chip_id = __hw_mmb_get_chip_id(hw);
+ 
+   hw_stats = &hw->hw_stats;
+@@ -6971,34 +6931,29 @@ _mtlk_hw_parse_statistics (mtlk_hw_t *hw)
+   if (_chipid_is_gen6_a0 (chip_id)) {
+       size = sizeof(StatisticsDb_t_wave600);
+       phy_stats_size = sizeof(wholePhyRxStatusDb_t_wave600);
++      phy_stats = (void*)MTLK_GET_STATS_ADDRESS_A0(hw_stats->stats_copy, phyStatistics);
+   } else /* if (_chipid_is_gen6_b0 (chip_id)) */ {
+       size = sizeof(StatisticsDb_t_wave600b);
+       phy_stats_size = sizeof(wholePhyRxStatusDb_t_wave600b);
++      phy_stats = (void*)MTLK_GET_STATS_ADDRESS_B0(hw_stats->stats_copy, phyStatistics);
+   }
+ 
+   ILOG3_V("Dumping the statistics");
+   mtlk_dump(3, hw_stats->stats_data, MIN(32,  size), "dump of Statistics");
+ 
+   /* Convert endianess */
+-  mtlk_osal_lock_acquire(&hw_stats->lock);
+   _mtlk_hw_check_and_convert_endianess(hw);
+-  mtlk_osal_lock_release(&hw_stats->lock);
+ 
+   /* copy stats_data to stats_copy */
+-  mtlk_osal_lock_acquire(&hw_stats->lock);
+   wave_memcpy(hw_stats->stats_copy, size, hw_stats->stats_data, size);
+-  mtlk_osal_lock_release(&hw_stats->lock);
+-
+ 
+   /* Parse phyStatistics to phy_rx_status */
+-  mtlk_osal_lock_acquire(&hw_stats->lock);
+-  wave_memcpy(phy_rx_status->db_data, phy_stats_size, MTLK_STATS_DATA_OFFSET(phyStatistics, chip_id), phy_stats_size);
+-  mtlk_osal_lock_release(&hw_stats->lock);
++  wave_memcpy(phy_rx_status->db_data, phy_rx_status->db_size, phy_stats, phy_stats_size);
+   return res;
+ }
+ 
+-int
+-_mtlk_hw_get_statistics (mtlk_hw_t *hw)
++int __MTLK_IFUNC
++mtlk_hw_get_statistics (mtlk_hw_t *hw)
+ {
+   mtlk_txmm_msg_t          man_msg;
+   mtlk_txmm_data_t        *man_entry;
+@@ -7032,7 +6987,7 @@ _mtlk_hw_get_statistics (mtlk_hw_t *hw)
+   req->length        = HOST_TO_MAC32(size);
+   req->status         = UMI_OK;
+ 
+-  ILOG2_DDD("CID-%02x: Statistics data: size %d, dma_addr 0x%08x, ",
++  ILOG3_DDD("CID-%02x: Statistics data: size %d, dma_addr 0x%08x, ",
+                 hw->card_idx, size, dma_addr);
+   res = mtlk_txmm_msg_send_blocked(&man_msg, MTLK_MM_BLOCKED_SEND_TIMEOUT);
+ 
+@@ -7049,13 +7004,14 @@ _mtlk_hw_get_statistics (mtlk_hw_t *hw)
+     res = MTLK_ERR_MAC;
+   }
+ 
+-  /* without lock because it is called once during init */
+   if (res == MTLK_ERR_OK) {
+-    ILOG2_DDPD("CID-%02x: MHI statistics table: size %d, buffer 0x%p, phys_addr 0x%08X",
++    ILOG3_DDPD("CID-%02x: Statistics Data: size %d, buffer 0x%p, phys_addr 0x%08X",
+                hw->card_idx, size,
+                hw_stats->stats_data, virt_to_phys(hw_stats->stats_data));
+ 
++    mtlk_osal_lock_acquire(&hw_stats->lock);
+     res = _mtlk_hw_parse_statistics(hw);
++    mtlk_osal_lock_release(&hw_stats->lock);
+ 
+     /* Update HW related statistics */
+     _mtlk_hw_mhi_update_hw_stats(hw, hw_stats);
+@@ -13726,8 +13682,9 @@ int scan_get_rssi (mtlk_core_t *core, hw_statistics_t *hw_stats)
+ 
+   if ( num_of_stas > 0) {
+     for (i = 0; i < num_of_stas; i++) {
+-      if (!_chipid_is_gen6_a0(chip_id)) { /* b0 etc */
+-        total_rssi += *(int8*)( hw_stats->stats_copy + (int)MTLK_OFFSET_OF(StatisticsDb_t_wave600b, alphaFilterStats.maxRssi[i]));
++      if (_chipid_is_gen6_b0(chip_id)) { /* b0 etc */
++        total_rssi += MTLK_GET_STATS_B0(hw_stats->stats_copy, alphaFilterStats.maxRssi[i]);
++
+       }
+     }
+     return (total_rssi/num_of_stas);
+@@ -13736,17 +13693,17 @@ int scan_get_rssi (mtlk_core_t *core, hw_statistics_t *hw_stats)
+   }
+ }
+ 
+-int scan_get_noiseFloor (mtlk_core_t *core, hw_statistics_t *hw_stats, int rssi)
++int __MTLK_IFUNC
++mtlk_hw_get_noiseFloor (mtlk_core_t *core, hw_statistics_t *hw_stats)
+ {
+   mtlk_hw_t *hw = mtlk_vap_get_hw(core->vap_handle);
+   wave_radio_t  *radio = wave_vap_radio_get(core->vap_handle);
+   unsigned radio_idx;
+-  int chip_id = __hw_mmb_get_chip_id(hw);
+ 
+   radio_idx = wave_radio_id_get(radio);
+ 
+-  return _mtlk_hw_get_noise_by_phy_metrics(hw, (uint8*)(MTLK_STATS_COPY_OFFSET(phyStatistics.devicePhyRxStatus[radio_idx].noise, chip_id)),
+-                                             (uint8*)(MTLK_STATS_COPY_OFFSET(phyStatistics.devicePhyRxStatus[radio_idx].rf_gain, chip_id))); 
++  return _mtlk_hw_get_noise_by_phy_metrics(hw, &hw->phy_rx_status.db_data->devicePhyRxStatus[radio_idx].noise[0],
++                                             &hw->phy_rx_status.db_data->devicePhyRxStatus[radio_idx].rf_gain[0]); 
+ }
+ 
+ int scan_get_aocs_info (mtlk_core_t *core, struct intel_vendor_channel_data *ch_data, struct channel_survey_support *csys)
+@@ -13761,24 +13718,24 @@ int scan_get_aocs_info (mtlk_core_t *core, struct intel_vendor_channel_data *ch_
+   hw_stats = &hw->hw_stats;
+   radio_idx = wave_radio_id_get(wave_vap_radio_get(core->vap_handle));
+   mtlk_osal_lock_acquire(&hw_stats->lock);
+-  ch_data->dynBW20             = *(uint32*)(MTLK_STATS_COPY_OFFSET(dynamicBwStats.dynamicBW20MHz[radio_idx], chip_id));
+-  ch_data->dynBW40             = *(uint32*)(MTLK_STATS_COPY_OFFSET(dynamicBwStats.dynamicBW40MHz[radio_idx], chip_id));
+-  ch_data->dynBW80             = *(uint32*)(MTLK_STATS_COPY_OFFSET(dynamicBwStats.dynamicBW80MHz[radio_idx], chip_id));
+-  ch_data->dynBW160            = *(uint32*)(MTLK_STATS_COPY_OFFSET(dynamicBwStats.dynamicBW160MHz[radio_idx], chip_id));
+-  ch_data->ext_sta_rx          = *(uint32*)(MTLK_STATS_COPY_OFFSET(phyStatistics.devicePhyRxStatus[radio_idx].extStaRx, chip_id));
+-  ch_data->tx_power            = *(uint32*)(MTLK_STATS_COPY_OFFSET(phyStatistics.devicePhyRxStatus[radio_idx].txPower, chip_id));
++  ch_data->dynBW20             = MTLK_GET_STATS(hw_stats->stats_copy, dynamicBwStats.dynamicBW20MHz[radio_idx], chip_id);
++  ch_data->dynBW40             = MTLK_GET_STATS(hw_stats->stats_copy, dynamicBwStats.dynamicBW40MHz[radio_idx], chip_id);
++  ch_data->dynBW80             = MTLK_GET_STATS(hw_stats->stats_copy, dynamicBwStats.dynamicBW80MHz[radio_idx], chip_id);
++  ch_data->dynBW160            = MTLK_GET_STATS(hw_stats->stats_copy, dynamicBwStats.dynamicBW160MHz[radio_idx], chip_id);
++  ch_data->ext_sta_rx          = MTLK_GET_STATS(hw_stats->stats_copy, phyStatistics.devicePhyRxStatus[radio_idx].extStaRx, chip_id);
++  ch_data->tx_power            = MTLK_GET_STATS(hw_stats->stats_copy, phyStatistics.devicePhyRxStatus[radio_idx].txPower, chip_id);
+ 
+   ch_data->rssi                = scan_get_rssi(core, hw_stats);
+-  ch_data->noise_floor         = scan_get_noiseFloor(core, hw_stats, ch_data->rssi);
++  ch_data->noise_floor         = mtlk_hw_get_noiseFloor(core, hw_stats);
+   if (mtlk_stadb_stas_num(&core->slow_ctx->stadb) > 0) {
+     ch_data->snr                 = (uint8) (ch_data->rssi - ch_data->noise_floor);
+   } else {
+     ch_data->snr                 = 0;
+   }
+ 
+-  ch_data->cwi_noise           = *(int8*)(MTLK_STATS_COPY_OFFSET(phyStatistics.devicePhyRxStatus[radio_idx].CWIvalue, chip_id));
+-  ch_data->busy_time           = ((uint32)(*(unsigned char*)(MTLK_STATS_COPY_OFFSET(phyStatistics.devicePhyRxStatus[radio_idx].channel_load, chip_id)))) * 255 / 100;
+-  ch_data->load = *(unsigned char*)(MTLK_STATS_COPY_OFFSET(phyStatistics.devicePhyRxStatus[radio_idx].channel_load, chip_id));
++  ch_data->cwi_noise           = MTLK_GET_STATS(hw_stats->stats_copy, phyStatistics.devicePhyRxStatus[radio_idx].CWIvalue, chip_id);
++  ch_data->busy_time           = ((uint32)(MTLK_GET_STATS(hw_stats->stats_copy, phyStatistics.devicePhyRxStatus[radio_idx].channel_load, chip_id))) * 255 / 100;
++  ch_data->load                = MTLK_GET_STATS(hw_stats->stats_copy, phyStatistics.devicePhyRxStatus[radio_idx].channel_load, chip_id);
+   mtlk_osal_lock_release(&hw_stats->lock);
+ 
+   ch_data->filled_mask = CHDATA_DYNBW | CHDATA_NOISE_FLOOR | CHDATA_RSSI | CHDATA_SNR |
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.h b/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.h
+index 7054d60..20710a4 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.h
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/hw_mmb.h
+@@ -479,7 +479,7 @@ int __MTLK_IFUNC
+ mtlk_hw_mhi_get_stats (mtlk_hw_t *hw);
+ #else
+ int __MTLK_IFUNC
+-_mtlk_hw_get_statistics (mtlk_hw_t *hw);
++mtlk_hw_get_statistics (mtlk_hw_t *hw);
+ 
+ BOOL __MTLK_IFUNC
+ wave_hw_radio_band_cfg_is_single (mtlk_hw_t *hw);
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/scan_support.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/scan_support.c
+index 3f5b20b..1e45a27 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/scan_support.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/scan_support.c
+@@ -990,13 +990,13 @@ static int scan_timeout_func(mtlk_core_t *core, mtlk_scan_support_t *ss)
+       ch_data.total_time = 255;
+       ch_data.calibration = css[idx].calib_done_mask;
+ 
+-      /* _mtlk_hw_get_statistics is called directly from scan context of
++      /* mtlk_hw_get_statistics is called directly from scan context of
+        * current core  and not from stats timer context of any other core,
+        * to avoid both scan(current core) and stats(for any other core)
+        * from overwriting the common stats buffer.
+        * */
+ 
+-      res = _mtlk_hw_get_statistics(mtlk_vap_get_hw(core->vap_handle));
++      res = mtlk_hw_get_statistics(mtlk_vap_get_hw(core->vap_handle));
+       if (res != MTLK_ERR_OK) {
+         ELOG_V("Failed to retrieve Statistics ");
+         return res;
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/stadb.h b/drivers/net/wireless/intel/iwlwav/wireless/driver/stadb.h
+index c510626..eb841d9 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/stadb.h
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/stadb.h
+@@ -154,38 +154,38 @@ typedef enum {
+ #ifndef MTLK_LEGACY_STATISTICS
+ typedef struct _rssiSnapshot_t
+ {
+-  unsigned char    rssi[4];      /* Last 4 RSSI frames received */
+-  unsigned char    time_s[4];    /* Time of when last 4 RSSI were received */
+-  unsigned short   count;        /* Sequence numer of received managemant (bcn, ack) frames */
++  uint8    rssi[4];      /* Last 4 RSSI frames received */
++  uint8    time_s[4];    /* Time of when last 4 RSSI were received */
++  uint16   count;        /* Sequence numer of received managemant (bcn, ack) frames */
+ } rssiSnapshot_t;
+ typedef struct devicePhyRxStatusDb
+ {
+-  unsigned char    noise[PHY_STATISTICS_MAX_RX_ANT];
+-  unsigned char    rf_gain[PHY_STATISTICS_MAX_RX_ANT];
+-  unsigned long    irad;
+-  unsigned long    tsf;
+-  unsigned char    channel_load;
+-  unsigned char    totalChannelUtilization;    /* Total Channel Utilization is an indication of how congested the medium is (all APs) */
+-  char             chNon80211Noise;
+-  char             CWIvalue;
+-  unsigned long    extStaRx;
+-  signed short int txPower;
+-  unsigned char    channelNum;
+-  unsigned char    reserved;
++  uint8    noise[PHY_STATISTICS_MAX_RX_ANT];
++  uint8    rf_gain[PHY_STATISTICS_MAX_RX_ANT];
++  uint32   irad;
++  uint32   tsf;
++  uint8    channel_load;
++  uint8    totalChannelUtilization;    /* Total Channel Utilization is an indication of how congested the medium is (all APs) */
++  int8     chNon80211Noise;
++  int8     CWIvalue;
++  uint32   extStaRx;
++  int16    txPower;
++  uint8    channelNum;
++  uint8    reserved;
+ 
+ }devicePhyRxStatusDb_t;
+ 
+ typedef struct stationPhyRxStatusDb
+ {
+-  char             rssi[PHY_STATISTICS_MAX_RX_ANT];
+-  unsigned long    phyRate;    /* 17 bits [20:4] */
+-  unsigned long    irad;
+-  unsigned long    lastTsf;
+-  unsigned long    perClientRxtimeUsage;
++  int8             rssi[PHY_STATISTICS_MAX_RX_ANT];
++  uint32           phyRate;    /* 17 bits [20:4] */
++  uint32           irad;
++  uint32           lastTsf;
++  uint32           perClientRxtimeUsage;
+   uint8            noise[PHY_STATISTICS_MAX_RX_ANT];
+   uint8            gain[PHY_STATISTICS_MAX_RX_ANT];
+   rssiSnapshot_t   rssiAckAvarage; /* AP_MODE: RSSI from last 4 ack received */
+-  unsigned char    rssiArray[PHY_STATISTICS_MAX_RX_ANT][NUM_OF_EXTENTION_RSSI];   /* <! 4=antennas, 4=20+20+40+80 extension rssi */
++  uint8            rssiArray[PHY_STATISTICS_MAX_RX_ANT][NUM_OF_EXTENTION_RSSI];   /* <! 4=antennas, 4=20+20+40+80 extension rssi */
+ 
+   /* Per antenna RSSI (above noise floor) for all widths (primary,secondary)
+   -----------------------------------------------
+@@ -198,7 +198,7 @@ typedef struct stationPhyRxStatusDb
+   |  ...      |  ...
+   |  8        |  rssi  [pri20,sec20,sec40,sec80 ]
+   ----------------------------------------------- */
+-  unsigned char    reserved[2];
++  uint8            reserved[2];
+ 
+   /* Last possible word num is 14 (total of 15 words that can be configured to pac Extrap for 4 bits parameter */
+ }stationPhyRxStatusDb_t;
+diff --git a/drivers/net/wireless/intel/iwlwav/wireless/driver/txmm.c b/drivers/net/wireless/intel/iwlwav/wireless/driver/txmm.c
+index 7be2a1f..bf597f1 100644
+--- a/drivers/net/wireless/intel/iwlwav/wireless/driver/txmm.c
++++ b/drivers/net/wireless/intel/iwlwav/wireless/driver/txmm.c
+@@ -796,6 +796,8 @@ static int _mtlk_txmm_send_ex (mtlk_txmm_t*      obj,
+ #ifdef MTLK_LEGACY_STATISTICS
+       data->id != UM_MAN_PHY_STATUS_REQ &&
+       data->id != UM_MAN_GET_STATISTICS_DATA_REQ &&
++#else
++      data->id != UM_MAN_GET_STATISTICS_REQ &&
+ #endif
+       data->id != UM_MAN_POLL_CLIENT_REQ
+       )
+-- 
+1.9.1
+
