@@ -234,7 +234,6 @@ static int dnv_gpio_remove(struct platform_device *pdev)
 	struct dnv_gpio_chip *cg_chips = platform_get_drvdata(pdev);
 	iounmap(cg_chips->regbase_c2);
 	iounmap(cg_chips->regbase_c5);
-	gpiochip_remove (&cg_chips->chip);	
 
 	return 0;
 }
