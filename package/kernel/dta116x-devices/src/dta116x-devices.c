@@ -63,11 +63,17 @@ static struct gpio_led_platform_data dta1160_leds_pdata = {
 	.leds = dta1160_leds,
 };
 
+static void platformdev_release(struct device *dev)
+{
+	//empty function
+}
+
 static struct platform_device dta1161_leds_pdev = {
 	.name = LED_DEVNAME,
 		.id = -1,
 		.dev = { 
 			.platform_data = &dta1161_leds_pdata,
+			.release = platformdev_release,
 		},
 }; 
 
@@ -76,6 +82,7 @@ static struct platform_device dta1160_leds_pdev = {
 		.id = -1,
 		.dev = { 
 			.platform_data = &dta1160_leds_pdata,
+			.release = platformdev_release,
 		},
 }; 
 
@@ -99,14 +106,15 @@ static struct platform_device dta1161_keys_pdev = {
 	.name		= "gpio-keys-polled",
 	.dev		= {
 		.platform_data	= &dta1161_gpio_keys_info,
+		.release = platformdev_release,
 	},
 };
 
-static struct platform_device *dta1160_devices[] __initdata = {
+static struct platform_device *dta1160_devices[] = {
 	&dta1160_leds_pdev,		
 };
 
-static struct platform_device *dta1161_devices[] __initdata = {
+static struct platform_device *dta1161_devices[] = {
 	&dta1161_leds_pdev,	
 	&dta1161_keys_pdev,
 };
@@ -124,12 +132,28 @@ static int __init dta116x_devices_init(void)
 		platform_add_devices(dta1160_devices,
 				    ARRAY_SIZE(dta1160_devices));
 	}
-	else
+	else{
 		pr_info("Add devices err: no DTA116X board info");
-	
+		return -1;
+	}
 	return 0;	
 }
 
-device_initcall(dta116x_devices_init);
+static void __exit dta116x_devices_exit(void)
+{
+        const char *board_name = dmi_get_system_info(DMI_PRODUCT_NAME);
+
+        if(!strcmp(board_name,BOARD_NAME_DTA1161AC4) || !strcmp(board_name,BOARD_NAME_DTA1161BC8)){
+                platform_device_unregister(dta1161_devices[0]);
+                platform_device_unregister(dta1161_devices[1]);
+        }
+        else if (!strcmp(board_name,BOARD_NAME_DTA1160)){
+                platform_device_unregister(dta1160_devices[0]);
+        }
+}
+
+module_init(dta116x_devices_init);
+module_exit(dta116x_devices_exit);
+
 MODULE_DESCRIPTION("For NEXSEC DTA116X ");
 MODULE_LICENSE("GPL");

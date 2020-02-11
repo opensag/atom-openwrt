@@ -1,0 +1,41 @@
+diff -Naur a/drivers/usb/serial/option.c b/drivers/usb/serial/option.c
+--- a/drivers/usb/serial/option.c	2018-08-16 00:13:02.000000000 +0800
++++ b/drivers/usb/serial/option.c	2020-01-16 10:34:27.519351892 +0800
+@@ -308,6 +308,7 @@
+ #define ZTE_PRODUCT_ME3620_MBIM			0x0426
+ #define ZTE_PRODUCT_ME3620_X			0x1432
+ #define ZTE_PRODUCT_ME3620_L			0x1433
++#define ZTE_PRODUCT_ME3630                      0x1476             //Nexsec ADD for ME3630
+ #define ZTE_PRODUCT_AC2726			0xfff1
+ #define ZTE_PRODUCT_MG880			0xfffd
+ #define ZTE_PRODUCT_CDMA_TECH			0xfffe
+@@ -566,6 +567,7 @@
+ static const struct usb_device_id option_ids[] = {
+ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_COLT) },
+ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA) },
++	{ USB_DEVICE(ZTE_VENDOR_ID, ZTE_PRODUCT_ME3630) }, /*Nexsec add for ZTE ME3630*/
+ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA_LIGHT) },
+ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA_QUAD) },
+ 	{ USB_DEVICE(OPTION_VENDOR_ID, OPTION_PRODUCT_RICOLA_QUAD_LIGHT) },
+@@ -2006,6 +2008,21 @@
+ 	    iface_desc->bInterfaceClass != USB_CLASS_CDC_DATA)
+ 		return -ENODEV;
+ 
++
++/*Nexsec add for ZTE ME3630*/
++printk("idVendor=%x, idProduct=%x, bInterfaceNumber =%d\r\n", serial->dev->descriptor.idVendor, serial->dev->descriptor.idProduct, serial->interface->cur_altsetting->desc.bInterfaceNumber); 
++if (serial->dev->descriptor.idVendor == 0x19d2 &&serial->dev->descriptor.idProduct == 0x1476 &&serial->interface->cur_altsetting->desc. bInterfaceNumber == 3) 
++return -ENODEV; 
++if (serial->dev->descriptor.idVendor == 0x19d2 &&serial->dev->descriptor.idProduct == 0x1476 &&serial->interface->cur_altsetting->desc. bInterfaceNumber == 4) 
++return -ENODEV; 
++if (serial->dev->descriptor.idVendor == 0x19d2 &&serial->dev->descriptor.idProduct == 0x1476 &&serial->interface->cur_altsetting->desc. bInterfaceNumber == 5) 
++return -ENODEV; 
++if (serial->dev->descriptor.idVendor == 0x19d2 &&serial->dev->descriptor.idProduct == 0x0199 &&serial->interface->cur_altsetting->desc. bInterfaceNumber == 0) 
++return -ENODEV; 
++if (serial->dev->descriptor.idVendor == 0x19d2 &&serial->dev->descriptor.idProduct == 0x0199 &&serial->interface->cur_altsetting->desc. bInterfaceNumber == 1) 
++return -ENODEV;
++/*Nexsec ADD END*/
++
+ 	/* Store the device flags so we can use them during attach. */
+ 	usb_set_serial_data(serial, (void *)device_flags);
+ 

@@ -146,7 +146,7 @@ static int cpld_gpio_remove(struct platform_device *pdev)
 	
 	struct cpld_gpio_chip *cg_chips = platform_get_drvdata(pdev);
 	
-	gpiochip_remove (&cg_chips->chip);	
+	devm_gpiochip_remove(&pdev->dev,&cg_chips->chip);
 
 	return 0;
 }
